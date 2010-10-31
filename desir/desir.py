@@ -134,8 +134,41 @@ class Redis(object):
             else:
                 raise StopIteration
 
+    @RedisInner
+    class Hash(dict):
+        def __init__(self, name):
+            self._keyid=name
+            resp=self.redis.hgetall(self._keyid)
+            if resp:
+                dict.__init__(self,zip(resp[::2],resp[1::2]))
 
+        def __repr__(self):
+            return str(self.items())
 
+	def __getattr__(self, item):
+            if item.startswith("_"):
+                return self.__getitem__(item)
+            resp=self.redis.hget(self._keyid,item)
+            if resp:
+                return resp
+            else:
+                raise AttributeError("Unkown attribute %s for object %s" % (item,self._keyid))
+
+	def __setattr__(self, item, value):
+            if item.startswith("_"):
+                return self.__setitem__(item,value)
+            self.redis.hset(self._keyid,item,value)
+
+        def keys(self):
+            return self.redis.hkeys(self._keyid)
+
+        def values(self):
+            return self.redis.hvals(self._keyid)
+
+        def items(self):
+            resp=self.redis.hgetall(self._keyid)
+            if resp:
+                return zip(resp[::2],resp[1::2])
 
 
     def __init__(self,host="localhost",port=6379,db=0,password=None,timeout=None):
