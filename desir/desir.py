@@ -33,6 +33,8 @@
 
 import socket
 import re
+import pickle
+import time
 
     
 class RedisError(Exception):
@@ -42,21 +44,36 @@ class NodeError(Exception):
     pass
 
 
+class RedisInner(object):
+  def __init__(self, cls):
+    self.cls = cls
+  def __get__(self, instance, outerclass):
+    class Wrapper(self.cls):
+      redis = instance
+    Wrapper.__name__ = self.cls.__name__
+    return Wrapper
+
+
 class Redis(object):
     """
     class providing a client interface to Redis
     this class is a minimalist implementation of
     http://code.google.com/p/redis/wiki/CommandReference
+    except for the DEL command which is renamed delete
+    because it is reserved in python
     """
     class redisCommand(object):
         def __init__(self,parent,name,arity,flag,vm_firstkey,vm_lastkey,vm_keystep):
             self.parent=parent
             self.name=name
+            self.cmdname=name
             self.arity=int(arity)
             self.flag=flag
             self.vm_firstkey=vm_firstkey; # The first argument that's a key (0 = no keys) 
             self.vm_lastkey=vm_lastkey;  # THe last argument that's a key 
             self.vm_keystep=vm_keystep;  # The step between first and last key
+            if self.name=="del":
+                self.cmdname="delete"
             if self.name=="select":
                 setattr(self,"runcmd",self._select)
             else:
@@ -71,24 +88,77 @@ class Redis(object):
                 self.parent.db=int(args[0])
             return resp
 
+    @RedisInner
+    class Counter:
+        def __init__(self, name, seed=0):
+            self.name = name
+            self.redis.set(self.name,seed)
 
-    def __init__(self,host="localhost",port=6379,db=0,timeout=None):
+        def __iter__(self):
+            return self
+
+        def __int__(self):
+            return int(self.redis.get(self.name))
+
+        def __str__(self):
+            return self.redis.get(self.name)
+
+        def next(self):
+            return self.redis.incr(self.name)
+
+    @RedisInner
+    class Connector(object):
+        def __init__(self, name,timeout=0,fifo=True):
+            self.name = name
+            self.timeout = timeout
+            self.fifo = fifo
+
+        def __iter__(self):
+            return self
+
+        def send(self,name,val,timeout=0):
+            return self.redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
+
+        def receive(self,timeout=0):
+            if self.fifo:
+                resp=self.redis.blpop(self.name,timeout)
+            else:
+                resp=self.redis.rlpop(self.name,timeout)
+            if resp:
+                return pickle.loads(resp[1])
+
+        def next(self):
+            resp = self.receive(self.timeout)
+            if resp:
+                return resp
+            else:
+                raise StopIteration
+
+
+
+
+
+    def __init__(self,host="localhost",port=6379,db=0,password=None,timeout=None):
         self.host=host
         self.port=port
         self.timeout=timeout
         self.db=db
-        self.Nodes=[Node(host,port,db,timeout)]
+        self.password=password
+        self.Nodes=[Node(host,port,db,password,timeout)]
         # Nodes to be used for cluster
         cmdfilter=re.compile('\{"(\w+)",(\w+),([-,\w]+),(\w+),(\w+),(\w+),([-,\w]+),(\w+)\}')
             
         for cmd in cmdfilter.findall(redisCommands):
             rc=self.redisCommand(self,cmd[0],cmd[2],cmd[3],cmd[4],cmd[5],cmd[6])
-            setattr(self,cmd[0],rc.runcmd)
+            setattr(self,rc.cmdname,rc.runcmd)
 
 
     def runcmd(self,cmdname,*args):
         #cluster implementation to come soon after antirez publish the first cluster implementation
         return self.Nodes[0].runcmd(cmdname,*args)
+
+    def runcmdon(self,node,cmdname,*args):
+        return self.node.runcmd(cmdname,*args)
     
 
 
@@ -98,10 +168,11 @@ class Node(object):
     Manage TCP connections to a redis node
     """
 
-    def __init__(self,host="localhost",port=6379,db=0,timeout=None):
+    def __init__(self,host="localhost",port=6379,db=0,password=None,timeout=None):
         self.host=host
         self.port=port
         self.timeout=timeout
+        self.password=password
         self._sock=None
         self._fp=None
         self.db=db
@@ -123,6 +194,9 @@ class Node(object):
             sock.settimeout(self.timeout)
             self._sock = sock
             self._fp = sock.makefile('r')
+            if self.password:
+                if not self.runcmd("auth",self.password):
+                    raise RedisError("Authentication error: Invalid password")
             self.runcmd("select","0")
 
     def disconnect(self):
