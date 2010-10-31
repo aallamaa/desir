@@ -12,6 +12,31 @@ class Node(object):
     """
     Manage TCP connections to a redis node
     """
+    class redisCommand(object):
+        def __init__(self,parent,name,arity,flag,vm_firstkey,vm_lastkey,vm_keystep):
+            self.parent=parent
+            self.name=name
+            self.arity=int(arity)
+            self.flag=flag
+            self.vm_firstkey=vm_firstkey; # The first argument that's a key (0 = no keys) 
+            self.vm_lastkey=vm_lastkey;  # THe last argument that's a key 
+            self.vm_keystep=vm_keystep;  # The step between first and last key
+            if self.name=="select":
+                setattr(self,"runcmd",self._select)
+            else:
+                setattr(self,"runcmd",self._runcmd)
+
+        def _runcmd(self,*args):
+            return self.parent.runcmd(self.name,*args)
+
+        def _select(self,*args):
+            resp=self.parent.runcmd(self.name,*args)
+            if resp=="OK":
+                self.parent.db=int(args[0])
+            return resp
+            
+
+
     def __init__(self,host="localhost",port=6379,db=0,timeout=None):
         self.host=host
         self.port=port
@@ -20,21 +45,9 @@ class Node(object):
         self._fp=None
         self.db=db
         cmdfilter=re.compile('\{"(\w+)",(\w+),([-,\w]+),(\w+),(\w+),(\w+),([-,\w]+),(\w+)\}')
-        class redisCommand(object):
-            def __init__(self,self2,name,arity,flag,vm_firstkey,vm_lastkey,vm_keystep):
-                self.self2=self2
-                self.name=name
-                self.arity=int(arity)
-                self.flag=flag
-                self.vm_firstkey=vm_firstkey; # The first argument that's a key (0 = no keys) 
-                self.vm_lastkey=vm_lastkey;  # THe last argument that's a key 
-                self.vm_keystep=vm_keystep;  # The step between first and last key 
-
-            def runcmd(self,*args):
-                return self.self2.runcmd(self.name,*args)
             
         for cmd in cmdfilter.findall(redisCommands):
-            rc=redisCommand(self,cmd[0],cmd[2],cmd[3],cmd[4],cmd[5],cmd[6])
+            rc=self.redisCommand(self,cmd[0],cmd[2],cmd[3],cmd[4],cmd[5],cmd[6])
             setattr(self,cmd[0],rc.runcmd)
 
     def connect(self):
@@ -127,11 +140,6 @@ class Node(object):
 
     def runcmd(self,cmdname,*args):
         self.sendcmd(cmdname,*args)
-        if cmdname=="select":
-            resp=self.parse_resp()
-            if resp=="OK":
-                self.db=int(args[0])
-                return resp
         return self.parse_resp()
             
 redisCommands="""
