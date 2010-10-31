@@ -23,8 +23,7 @@ you can use object Counter from Redis as a unique counter across as
 many process, thread, server you could potentially have providing they
 can access the same redis instance/cluster.
 
-import desir
-
+>>> import desir
 >>> r=desir.Redis()
 >>> counter_name="counter" # the name of the counter is counter, meaning
 >>> the key used inside redis is this name
@@ -35,15 +34,14 @@ import desir
 ... print i
 ... if i>10:
 ...  break
-
 >>> print "the next value of the counter is", c.next()
 
-Result:
-the initial value of the counter is 5
-6
-7
-8
-9
-10
-11
-the next value of the counter is 12
+|Result:
+|the initial value of the counter is 5
+|6
+|7
+|8
+|9
+|10
+|11
+|the next value of the counter is 12
