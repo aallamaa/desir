@@ -1,1 +1,1 @@
-from desir import Node
+from desir import Node,Redis,RedisError,NodeError

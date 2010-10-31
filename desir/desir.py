@@ -1,3 +1,36 @@
+#
+# Copyright (c) 2010, Abdelkader ALLAM <abdelkader.allam at gmail dot com>
+# All rights reserved.
+#
+# This source also contains source code from Redis
+# developped by Salvatore Sanfilippo <antirez at gmail dot com>
+# available at http://github.com/antirez/redis
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+#    * Redistributions of source code must retain the above copyright notice,
+#      this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in the
+#      documentation and/or other materials provided with the distribution.
+#    * Neither the name of Redis nor the names of its contributors may be used
+#      to endorse or promote products derived from this software without
+#      specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+#  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+#  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+#  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+#  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+#  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+#  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+#  POSSIBILITY OF SUCH DAMAGE.
+# 
+
 import socket
 import re
 
@@ -8,9 +41,12 @@ class RedisError(Exception):
 class NodeError(Exception):
     pass
 
-class Node(object):
+
+class Redis(object):
     """
-    Manage TCP connections to a redis node
+    class providing a client interface to Redis
+    this class is a minimalist implementation of
+    http://code.google.com/p/redis/wiki/CommandReference
     """
     class redisCommand(object):
         def __init__(self,parent,name,arity,flag,vm_firstkey,vm_lastkey,vm_keystep):
@@ -34,8 +70,33 @@ class Node(object):
             if resp=="OK":
                 self.parent.db=int(args[0])
             return resp
-            
 
+
+    def __init__(self,host="localhost",port=6379,db=0,timeout=None):
+        self.host=host
+        self.port=port
+        self.timeout=timeout
+        self.db=db
+        self.Nodes=[Node(host,port,db,timeout)]
+        # Nodes to be used for cluster
+        cmdfilter=re.compile('\{"(\w+)",(\w+),([-,\w]+),(\w+),(\w+),(\w+),([-,\w]+),(\w+)\}')
+            
+        for cmd in cmdfilter.findall(redisCommands):
+            rc=self.redisCommand(self,cmd[0],cmd[2],cmd[3],cmd[4],cmd[5],cmd[6])
+            setattr(self,cmd[0],rc.runcmd)
+
+
+    def runcmd(self,cmdname,*args):
+        #cluster implementation to come soon after antirez publish the first cluster implementation
+        return self.Nodes[0].runcmd(cmdname,*args)
+    
+
+
+    
+class Node(object):
+    """
+    Manage TCP connections to a redis node
+    """
 
     def __init__(self,host="localhost",port=6379,db=0,timeout=None):
         self.host=host
@@ -44,11 +105,6 @@ class Node(object):
         self._sock=None
         self._fp=None
         self.db=db
-        cmdfilter=re.compile('\{"(\w+)",(\w+),([-,\w]+),(\w+),(\w+),(\w+),([-,\w]+),(\w+)\}')
-            
-        for cmd in cmdfilter.findall(redisCommands):
-            rc=self.redisCommand(self,cmd[0],cmd[2],cmd[3],cmd[4],cmd[5],cmd[6])
-            setattr(self,cmd[0],rc.runcmd)
 
     def connect(self):
         if self._sock:
