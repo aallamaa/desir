@@ -33,7 +33,6 @@ Traceback (most recent call last):
   File "desir/desir.py", line 261, in parse_resp
     raise RedisError(resp)
 desir.desir.RedisError: ERR Operation against a key holding the wrong kind of value
-
 >>> r.type("test")
 'list'
 >>> r.rpop("test")
@@ -88,11 +87,13 @@ redis list using the connector name as the key name inside redis.
 Here is how it works:
 
 On client "toto" you do this:
+
 >>> import desir
 >>> n=desir.Redis()
 >>> c=n.Connector("toto",timeout=5)
 
 On client "tata" you do the same:
+
 >>> import desir
 >>> n=desir.Redis()
 >>> d=n.Connector("tata",timeout=5)
