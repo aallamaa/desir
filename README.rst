@@ -17,7 +17,7 @@ sudo python setup.py install
 Pythonic sugar
 ==========
 
-#. Iterator
+1. Iterator
 --------
 
 You can use object Counter from a Redis class instance as a unique counter across as
@@ -36,8 +36,6 @@ can access the same redis instance/cluster.
 ...  if i>10:
 ...   break
 >>> print "the next value of the counter is", c.next()
-
-Result:
  the initial value of the counter is 5
  6
  7
@@ -46,8 +44,9 @@ Result:
  10
  11
  the next value of the counter is 12
+>>>
 
-#. Connector
+2. Connector
 ----------
 
 A connector is an attempt to make a message passing interface similar
