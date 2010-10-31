@@ -53,7 +53,7 @@ A connector is an attempt to make a message passing interface similar
 to the Erlang send / receive message passing functions.
 
 A connector is defined by its name which is pointing internaly to a
-redis list using the same connector name as the key inside redis.
+redis list using the connector name as the key name inside redis.
 
 Here is how it works:
 
