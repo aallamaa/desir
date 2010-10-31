@@ -14,6 +14,36 @@ Install
 sudo python setup.py install
 
 
+Minimalist redis client
+==============
+
+>>> import desir
+>>> r=desir.Redis()
+>>> r.keys("*")
+['user', 'counter', 'user.adam', 'test', 'c', 'cnt', 'telecom-tid', 'count', 'new', 'bank-tid']
+>>> r.get("test")
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "desir/desir.py", line 83, in _runcmd
+    return self.parent.runcmd(self.name,*args)
+  File "desir/desir.py", line 158, in runcmd
+    return self.Nodes[0].runcmd(cmdname,*args)
+  File "desir/desir.py", line 273, in runcmd
+    return self.parse_resp()
+  File "desir/desir.py", line 261, in parse_resp
+    raise RedisError(resp)
+desir.desir.RedisError: ERR Operation against a key holding the wrong kind of value
+
+>>> r.type("test")
+'list'
+>>> r.rpop("test")
+'test'
+>>> r.rpop("test")
+>>> r.get("count")
+'20000'
+
+
+
 Pythonic sugar
 ==========
 
