@@ -49,7 +49,7 @@ class RedisInner(object):
     self.cls = cls
   def __get__(self, instance, outerclass):
     class Wrapper(self.cls):
-      redis = instance
+      _redis = instance
     Wrapper.__name__ = self.cls.__name__
     return Wrapper
 
@@ -88,25 +88,40 @@ class Redis(object):
                 self.parent.db=int(args[0])
             return resp
 
-    @RedisInner
+    class String(object):
+        """
+        Redis String descriptor object
+        """
+        def __init__(self,name):
+            self.name=name
+
+        def __get__(self,instance,owner):
+
+            return [self,instance,owner,self._redis.get(self.name)]
+        
+        def __set__(self, instance, value):
+            return self._redis.set(self.name,value)
+    String=RedisInner(String)
+
+
     class Counter:
         def __init__(self, name, seed=0):
             self.name = name
-            self.redis.set(self.name,seed)
+            self._redis.set(self.name,seed)
 
         def __iter__(self):
             return self
 
         def __int__(self):
-            return int(self.redis.get(self.name))
+            return int(self._redis.get(self.name))
 
         def __str__(self):
-            return self.redis.get(self.name)
+            return self._redis.get(self.name)
 
         def next(self):
-            return self.redis.incr(self.name)
+            return self._redis.incr(self.name)
+    Counter=RedisInner(Counter)
 
-    @RedisInner
     class Connector(object):
         def __init__(self, name,timeout=0,fifo=True):
             self.name = name
@@ -117,13 +132,13 @@ class Redis(object):
             return self
 
         def send(self,name,val,timeout=0):
-            return self.redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
+            return self._redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
 
         def receive(self,timeout=0):
             if self.fifo:
-                resp=self.redis.blpop(self.name,timeout)
+                resp=self._redis.blpop(self.name,timeout)
             else:
-                resp=self.redis.rlpop(self.name,timeout)
+                resp=self._redis.rlpop(self.name,timeout)
             if resp:
                 return pickle.loads(resp[1])
 
@@ -133,22 +148,19 @@ class Redis(object):
                 return resp
             else:
                 raise StopIteration
-
-    @RedisInner
-    class Hash(dict):
+    Connector=RedisInner(Connector)
+    
+    class Hash(object):
         def __init__(self, name):
             self._keyid=name
-            resp=self.redis.hgetall(self._keyid)
-            if resp:
-                dict.__init__(self,zip(resp[::2],resp[1::2]))
 
         def __repr__(self):
             return str(self.items())
 
 	def __getattr__(self, item):
             if item.startswith("_"):
-                return self.__getitem__(item)
-            resp=self.redis.hget(self._keyid,item)
+                return object.__getattribute__(self, item)
+            resp=self._redis.hget(self._keyid,item)
             if resp:
                 return resp
             else:
@@ -156,21 +168,23 @@ class Redis(object):
 
 	def __setattr__(self, item, value):
             if item.startswith("_"):
-                return self.__setitem__(item,value)
-            self.redis.hset(self._keyid,item,value)
+                return  object.__setattr__(self, item, value)
+            else:
+                self._redis.hset(self._keyid,item,value)
 
         def keys(self):
-            return self.redis.hkeys(self._keyid)
+            return self._redis.hkeys(self._keyid)
 
         def values(self):
-            return self.redis.hvals(self._keyid)
+            return self._redis.hvals(self._keyid)
 
         def items(self):
-            resp=self.redis.hgetall(self._keyid)
+            resp=self._redis.hgetall(self._keyid)
             if resp:
                 return zip(resp[::2],resp[1::2])
 
-
+    Hash=RedisInner(Hash)
+    
     def __init__(self,host="localhost",port=6379,db=0,password=None,timeout=None):
         self.host=host
         self.port=port
