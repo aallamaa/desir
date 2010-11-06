@@ -192,12 +192,14 @@ class Redis(object):
         self.db=db
         self.password=password
         self.Nodes=[Node(host,port,db,password,timeout)]
+        self.redisCommands={}
         # Nodes to be used for cluster
         cmdfilter=re.compile('\{"(\w+)",(\w+),([-,\w]+),(\w+),(\w+),(\w+),([-,\w]+),(\w+)\}')
             
         for cmd in cmdfilter.findall(redisCommands):
             rc=self.redisCommand(self,cmd[0],cmd[2],cmd[3],cmd[4],cmd[5],cmd[6])
             setattr(self,rc.cmdname,rc.runcmd)
+            self.redisCommands[rc.cmdname]=rc
 
 
     def runcmd(self,cmdname,*args):
@@ -206,8 +208,14 @@ class Redis(object):
 
     def runcmdon(self,node,cmdname,*args):
         return self.node.runcmd(cmdname,*args)
-    
 
+    def renamecommand(self,name,newname,newfuncname=None):
+        if not self.redisCommands.has_key(name):
+            return False
+        rc=self.redisCommands[name]
+        rc.name=newname
+        if newfuncname:
+            setattr(self,rc.name,rc.runcmd)
 
     
 class Node(object):

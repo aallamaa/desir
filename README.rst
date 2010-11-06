@@ -6,7 +6,8 @@ Attempt to make a minimalist redis python client.
 Plus some nice pythonic stuff that will soon come.
 (message passing, iterator, dict, set and list transparent implementation)
 
-
+Desir is a permutation of Redis of course and related to the desire of
+antirez for 6379 (aka MERZ) http://antirez.com/print.php?postid=220
 
 Install
 =======
