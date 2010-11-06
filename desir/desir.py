@@ -59,7 +59,7 @@ class Redis(object):
     class providing a client interface to Redis
     this class is a minimalist implementation of
     http://code.google.com/p/redis/wiki/CommandReference
-    except for the DEL command which is renamed delete
+    except for the DEL and EXEC command which is renamed delete and execute
     because it is reserved in python
     """
     class redisCommand(object):
@@ -74,6 +74,8 @@ class Redis(object):
             self.vm_keystep=vm_keystep;  # The step between first and last key
             if self.name=="del":
                 self.cmdname="delete"
+            elif self.name=="exec":
+                self.cmdname="execute"
             if self.name=="select":
                 setattr(self,"runcmd",self._select)
             else:
