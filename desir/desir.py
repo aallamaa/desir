@@ -104,7 +104,7 @@ class Redis(object):
     class providing a client interface to Redis
     this class is a minimalist implementation of
     http://code.google.com/p/redis/wiki/CommandReference
-    except for the DEL command which is renamed delete
+    except for the DEL and EXEC command which is renamed delete and execute
     because it is reserved in python
     """
     __metaclass__ = MetaRedis
