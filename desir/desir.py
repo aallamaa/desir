@@ -104,11 +104,42 @@ class Redis(object):
     class providing a client interface to Redis
     this class is a minimalist implementation of
     http://code.google.com/p/redis/wiki/CommandReference
-    except for the DEL command which is renamed delete
+    except for the DEL and EXEC command which is renamed delete and execute
     because it is reserved in python
     """
+<<<<<<< HEAD
     __metaclass__ = MetaRedis
  
+=======
+    class redisCommand(object):
+        def __init__(self,parent,name,arity,flag,vm_firstkey,vm_lastkey,vm_keystep):
+            self.parent=parent
+            self.name=name
+            self.cmdname=name
+            self.arity=int(arity)
+            self.flag=flag
+            self.vm_firstkey=vm_firstkey; # The first argument that's a key (0 = no keys) 
+            self.vm_lastkey=vm_lastkey;  # THe last argument that's a key 
+            self.vm_keystep=vm_keystep;  # The step between first and last key
+            if self.name=="del":
+                self.cmdname="delete"
+            elif self.name=="exec":
+                self.cmdname="execute"
+            if self.name=="select":
+                setattr(self,"runcmd",self._select)
+            else:
+                setattr(self,"runcmd",self._runcmd)
+
+        def _runcmd(self,*args):
+            return self.parent.runcmd(self.name,*args)
+
+        def _select(self,*args):
+            resp=self.parent.runcmd(self.name,*args)
+            if resp=="OK":
+                self.parent.db=int(args[0])
+            return resp
+
+>>>>>>> 1825f5dc19645caa9508c877b152731d230472e1
     class String(object):
         """
         Redis String descriptor object
