@@ -44,7 +44,7 @@ redisCommands=None
 url="https://github.com/antirez/redis-doc/raw/master/commands.json"
 try:
     u=urllib2.urlopen(url)
-    #redisCommands=json.load(u)
+    redisCommands=json.load(u)
 except:
     pass
 
@@ -86,7 +86,9 @@ class MetaRedis(type):
 
             _trace.__name__ = str(name.lower())
             if name=="del":
-                _trace.__name__ ="delete"
+                _trace.__name__ = "delete"
+            if name=='exec':
+                _trace.__name__ = "execute"
 
             if redisCommand.has_key("summary"):
                 _trace.__doc__  = redisCommand["summary"]
