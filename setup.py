@@ -23,6 +23,9 @@ sdict = {
     'keywords' : ['Redis', 'key-value store'],
     'license' : 'New BSD License',
     'packages' : ['desir'],
+    'package_data' : {
+        '': ['*.json'],
+    },
     'classifiers' : [
        'Development Status :: 0.1 - Beta',
         'Environment :: Console',
