@@ -161,7 +161,7 @@ class Redis(object):
             if self.fifo:
                 resp=self._redis.blpop(self.name,timeout)
             else:
-                resp=self._redis.rlpop(self.name,timeout)
+                resp=self._redis.brpop(self.name,timeout)
             if resp:
                 return pickle.loads(resp[1])
 
