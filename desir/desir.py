@@ -146,20 +146,29 @@ class Redis(object):
     Counter=RedisInner(Counter)
 
     class Connector(object):
-        def __init__(self, name,timeout=0,fifo=True):
+        """
+        
+        CONNECTORNAME:UNIQUEID:TIMESTAMP
+        """
+        def __init__(self, name,timeout=0,fifo=True,safe=False):
             self.name = name
             self.timeout = timeout
             self.fifo = fifo
+            self.safe = safe
 
         def __iter__(self):
             return self
 
         def send(self,name,val,timeout=0):
-            return self._redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
+            if self.fifo:
+                return self._redis.lpush(name,pickle.dumps([self.name,time.time(),val]))
+            else:
+                return self._redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
 
         def receive(self,timeout=0):
-            if self.fifo:
-                resp=self._redis.blpop(self.name,timeout)
+            if self.safe:
+                tmpname="%s:%d:%d" % (self.name,int(time.time()),0)
+                resp=self._redis.brpoplpush(self.name,tmpname,timeout)
             else:
                 resp=self._redis.brpop(self.name,timeout)
             if resp:
