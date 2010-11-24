@@ -38,6 +38,13 @@ desir.desir.RedisError: ERR Operation against a key holding the wrong kind of va
 'list'
 >>> r.rpop("test")
 'test'
+>>> help(r.rpop)
+Help on method rpop in module desir.desir:
+rpop(self, *args) method of desir.desir.Redis instance
+    Remove and get the last element in a list
+    Parameters:
+    Name: key,      Type: key,      Multiple parameter:False
+(END) 
 >>> r.rpop("test")
 >>> r.get("count")
 '20000'
