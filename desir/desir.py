@@ -32,7 +32,7 @@
 # 
 
 import socket
-import types
+import os
 import pickle
 import time
 import urllib2
@@ -81,19 +81,23 @@ class MetaRedis(type):
             if name=="SELECT":
                 runcmd="_select"
 
-            def _trace(self, *args):
+            def _rediscmd(self, *args):
                 return methoddct[runcmd](self, name, *args)
 
-            _trace.__name__ = str(name.lower())
-            if name=="del":
-                _trace.__name__ = "delete"
-            if name=='exec':
-                _trace.__name__ = "execute"
-
+            try:
+                _rediscmd.__name__ = {"del":"delete","exec":"execute"} ["name"]
+            except:
+                _rediscmd.__name__ = str(name.lower())
+            _rediscmd._json = redisCommand
             if redisCommand.has_key("summary"):
-                _trace.__doc__  = redisCommand["summary"]
-            _trace.__dict__.update(methoddct[runcmd].__dict__)
-            return _trace
+                _doc = redisCommand["summary"]
+                if redisCommand.has_key("arguments"):
+                    _doc+="\nParameters:\n"
+                    for d in redisCommand["arguments"]:
+                        _doc+="Name: %s,\tType: %s,\tMultiple parameter:%s\n" % (d["name"],d["type"],d.get("multiple","False"))             
+                _rediscmd.__doc__  = _doc
+            _rediscmd.__dict__.update(methoddct[runcmd].__dict__)
+            return _rediscmd
 
         newDct = {}
         for k in redisCommands.keys():
@@ -148,7 +152,7 @@ class Redis(object):
     class Connector(object):
         """
         
-        CONNECTORNAME:UNIQUEID:TIMESTAMP
+        CONNECTORNAME:PID:TIMESTAMP
         """
         def __init__(self, name,timeout=0,fifo=True,safe=False):
             self.name = name
@@ -167,7 +171,7 @@ class Redis(object):
 
         def receive(self,timeout=0):
             if self.safe:
-                tmpname="%s:%d:%d" % (self.name,int(time.time()),0)
+                tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
                 resp=self._redis.brpoplpush(self.name,tmpname,timeout)
             else:
                 resp=self._redis.brpop(self.name,timeout)
