@@ -1,7 +1,7 @@
 =========================
 Desir Redis Python Client
 =========================
-Attempt to make a minimalist redis python client. Redis command are meta-generated based on the json commands description file "https://github.com/antirez/redis-doc/raw/master/commands.json" from redis repository. Documentation is also dynamically generated based on this file.
+Attempt to make a minimalist redis python client. Redis commands are meta-generated based on the json commands description file "https://github.com/antirez/redis-doc/raw/master/commands.json" from redis repository. Documentation is also dynamically generated based on this file.
 
 Plus some nice pythonic stuff that will soon come.
 (message passing, iterator, dict, set and list transparent implementation)

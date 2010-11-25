@@ -151,7 +151,7 @@ class Redis(object):
 
     class Connector(object):
         """
-        
+        safe queue implementation under work
         CONNECTORNAME:PID:TIMESTAMP
         """
         def __init__(self, name,timeout=0,fifo=True,safe=False):
