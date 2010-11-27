@@ -83,7 +83,7 @@ class MetaRedis(type):
 
             def _rediscmd(self, *args):
                 return methoddct[runcmd](self, name, *args)
-
+            
             try:
                 _rediscmd.__name__ = {"del":"delete","exec":"execute"} ["name"]
             except:
@@ -157,7 +157,13 @@ class Redis(object):
         def __init__(self, name,timeout=0,fifo=True,safe=False):
             self.name = name
             self.timeout = timeout
+            # connector queue/list set to fifo when fifo is true, and lifo when false
             self.fifo = fifo
+            # when safe is true, connector works in safe mode meaning each time
+            # a value is popped out of the list it is atomically pushed to a dedicated list
+            # when the program is done processing the object that was popped out,
+            # it can release it with the release commands which will remove it from the
+            # dedicated list
             self.safe = safe
 
         def __iter__(self):
@@ -170,13 +176,26 @@ class Redis(object):
                 return self._redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
 
         def receive(self,timeout=0):
+            tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
             if self.safe:
-                tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
                 resp=self._redis.brpoplpush(self.name,tmpname,timeout)
             else:
                 resp=self._redis.brpop(self.name,timeout)
             if resp:
-                return pickle.loads(resp[1])
+                resp=pickle.loads(resp[1])
+                if self.safe:
+                    resp._redis_key=tmpname
+            return resp
+                    
+                    
+
+        def release(self,val):
+            if "_redis_key" in dir(val):
+                return self._redis.rpop(self.name)
+            else:
+                #raise redis error to be added
+                return False
+            
 
         def next(self):
             resp = self.receive(self.timeout)
@@ -245,13 +264,6 @@ class Redis(object):
     def runcmdon(self,node,cmdname,*args):
         return self.node.runcmd(cmdname,*args)
 
-    def renamecommand(self,name,newname,newfuncname=None):
-        if not self.redisCommands.has_key(name):
-            return False
-        rc=self.redisCommands[name]
-        rc.name=newname
-        if newfuncname:
-            setattr(self,rc.name,rc.runcmd)
 
     
 class Node(object):
