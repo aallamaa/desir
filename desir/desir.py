@@ -43,8 +43,9 @@ from pkg_resources import resource_string
 redisCommands=None
 url="https://github.com/antirez/redis-doc/raw/master/commands.json"
 try:
-    u=urllib2.urlopen(url)
-    redisCommands=json.load(u)
+    pass
+    #u=urllib2.urlopen(url)
+    #redisCommands=json.load(u)
 except:
     pass
 
@@ -72,8 +73,10 @@ class RedisInner(object):
     Wrapper.__name__ = self.cls.__name__
     return Wrapper
 
+cmdmap={"del":"delete","exec":"execute"}
 
 class MetaRedis(type):
+       
        def __new__(metacls, name, bases, dct):
         def _wrapper(name,redisCommand,methoddct):
             
@@ -83,12 +86,10 @@ class MetaRedis(type):
 
             def _rediscmd(self, *args):
                 return methoddct[runcmd](self, name, *args)
-            
-            try:
-                _rediscmd.__name__ = {"del":"delete","exec":"execute"} ["name"]
-            except:
-                _rediscmd.__name__ = str(name.lower())
+
+            _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower()))
             _rediscmd._json = redisCommand
+            
             if redisCommand.has_key("summary"):
                 _doc = redisCommand["summary"]
                 if redisCommand.has_key("arguments"):
@@ -101,7 +102,7 @@ class MetaRedis(type):
 
         newDct = {}
         for k in redisCommands.keys():
-            newDct[k.lower()]= _wrapper(k,redisCommands[k],dct)
+            newDct[cmdmap.get(k.lower(),str(k.lower()))]= _wrapper(k,redisCommands[k],dct)
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
@@ -182,19 +183,18 @@ class Redis(object):
             else:
                 resp=self._redis.brpop(self.name,timeout)
             if resp:
-                resp=pickle.loads(resp[1])
                 if self.safe:
-                    resp._redis_key=tmpname
+                    resp=pickle.loads(resp)
+                    resp.append(tmpname)
+                else:
+                    resp=pickle.loads(resp[1])
+
             return resp
                     
                     
 
         def release(self,val):
-            if "_redis_key" in dir(val):
-                return self._redis.rpop(self.name)
-            else:
-                #raise redis error to be added
-                return False
+            return self._redis.rpop(val[-1])
             
 
         def next(self):

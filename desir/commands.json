@@ -828,6 +828,27 @@
     "since": "1.1",
     "group": "list"
   },
+  "BRPOPLPUSH": {
+    "summary": "Remove the last element in a list, append it to another list and return it",
+    "arguments": [
+      {
+        "name": "source",
+        "type": "key"
+      },
+      {
+        "name": "destination",
+        "type": "key"
+      },
+      {
+        "name": "timeout",
+        "type": "integer"
+      }
+
+    ],
+    "since": "2.2",
+    "group": "list"
+  },
+
   "RPUSH": {
     "summary": "Append a value to a list",
     "arguments": [
