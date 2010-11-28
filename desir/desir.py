@@ -316,6 +316,7 @@ class Node(object):
         try:
             return self._fp.read(length)
         except socket.error, msg:
+            self.disconnet()
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
             else:
@@ -326,6 +327,7 @@ class Node(object):
         try:
             return self._fp.readline()
         except socket.error, msg:
+            self.disconnect()
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
             else:
@@ -337,6 +339,7 @@ class Node(object):
         try:
             self._sock.send(message+"\r\n")
         except socket.error, msg:
+            self.disconnect()
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
             else:
