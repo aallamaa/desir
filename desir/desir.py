@@ -169,7 +169,7 @@ class Redis(object):
         def __iter__(self):
             return self
 
-        def send(self,name,val,timeout=0):
+        def send(self,name,val):
             if self.fifo:
                 return self._redis.lpush(name,pickle.dumps([self.name,time.time(),val]))
             else:
@@ -184,17 +184,18 @@ class Redis(object):
             if resp:
                 resp=pickle.loads(resp[1])
                 if self.safe:
-                    resp._redis_key=tmpname
+                    resp.append(tmpname)
             return resp
-                    
+
+        def transfer(self,name,val,newval):
+            self._redis.multi()
+            self.release(val)
+            self.send(name,newval)
+            return self._redis.execute()
                     
 
         def release(self,val):
-            if "_redis_key" in dir(val):
-                return self._redis.rpop(self.name)
-            else:
-                #raise redis error to be added
-                return False
+            return self._redis.rpop(val[-1])
             
 
         def next(self):
