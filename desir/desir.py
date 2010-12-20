@@ -55,13 +55,43 @@ if not redisCommands:
     except IOError:
         raise(Exception("Error unable to load commmands json file"))
 
+class SWM(dict):
+	"""
+	Connector message
+	"""
+	def __init__(self, initd=None):
+		if initd is None:
+			initd = {}
+		dict.__init__(self, initd)
 
+	def __getattr__(self, item):
+            try:
+                d = self.__getitem__(item)
+            except KeyError:
+                raise(AttributeError)
+            # if value is the only key in object, you can omit it
+            if isinstance(d, dict) and 'value' in d and len(d) == 1:
+                return d['value']
+            else:
+                return d
+
+	def __setattr__(self, item, value):
+		self.__setitem__(item, value)
     
 class RedisError(Exception):
     pass
 
 class NodeError(Exception):
     pass
+
+def safe(func):
+    def wrapped(*args):
+        while True:
+            try:
+                return func(*args)
+            except NodeError:
+                pass
+    return wrapped
 
 
 class RedisInner(object):
@@ -155,7 +185,7 @@ class Redis(object):
         safe queue implementation under work
         CONNECTORNAME:PID:TIMESTAMP
         """
-        def __init__(self, name,timeout=0,fifo=True,safe=False):
+        def __init__(self, name,ctype="",timeout=0,fifo=True,safe=False):
             self.name = name
             self.timeout = timeout
             # connector queue/list set to fifo when fifo is true, and lifo when false
@@ -166,15 +196,19 @@ class Redis(object):
             # it can release it with the release commands which will remove it from the
             # dedicated list
             self.safe = safe
+            self.ctype = ctype
 
         def __iter__(self):
             return self
 
-        def send(self,name,val):
+        def send(self,name,val=None):
+            vd=SWM(dict(src=self.name,srctype=self.ctype,dst=name,time=time.time(),val=val))
+            if not val:
+                vd.update(name)
             if self.fifo:
-                return self._redis.lpush(name,pickle.dumps([self.name,time.time(),val]))
+                return self._redis.lpush(vd.dst,pickle.dumps(vd))
             else:
-                return self._redis.rpush(name,pickle.dumps([self.name,time.time(),val]))
+                return self._redis.rpush(vd.dst,pickle.dumps(vd))
 
         def receive(self,timeout=0):
             tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
@@ -185,12 +219,14 @@ class Redis(object):
             if resp:
                 if self.safe:
                     resp=pickle.loads(resp)
-                    resp.append(tmpname)
+                    #resp.append(tmpname)
+                    resp["srcack"]=tmpname
                 else:
                     resp=pickle.loads(resp[1])
             return resp
 
         def transfer(self,name,val,newval):
+            self._redis.watch(val.tmpname)
             self._redis.multi()
             self.release(val)
             self.send(name,newval)
@@ -198,7 +234,8 @@ class Redis(object):
                     
 
         def release(self,val):
-            return self._redis.rpop(val[-1])
+            if val.has_key("srcack"):
+                return self._redis.rpop(val.srcack)
             
 
         def next(self):
