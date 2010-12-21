@@ -84,15 +84,6 @@ class RedisError(Exception):
 class NodeError(Exception):
     pass
 
-def safe(func):
-    def wrapped(*args):
-        while True:
-            try:
-                return func(*args)
-            except NodeError:
-                pass
-    return wrapped
-
 
 class RedisInner(object):
   def __init__(self, cls):
@@ -119,7 +110,6 @@ class MetaRedis(type):
 
             _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower()))
             _rediscmd._json = redisCommand
-            
             if redisCommand.has_key("summary"):
                 _doc = redisCommand["summary"]
                 if redisCommand.has_key("arguments"):
@@ -281,19 +271,26 @@ class Redis(object):
 
     Hash=RedisInner(Hash)
     
-    def __init__(self,host="localhost",port=6379,db=0,password=None,timeout=None):
+    def __init__(self,host="localhost",port=6379,db=0,password=None,timeout=None,safe=False):
         self.host=host
         self.port=port
         self.timeout=timeout
         self.db=db
         self.password=password
+        self.safe=safe
         self.Nodes=[Node(host,port,db,password,timeout)]
 
 
 
     def runcmd(self,cmdname,*args):
         #cluster implementation to come soon after antirez publish the first cluster implementation
+        if self.safe:
+            try:
+                return self.Nodes[0].runcmd(cmdname,*args)
+            except NodeError:
+                time.sleep(1)            
         return self.Nodes[0].runcmd(cmdname,*args)
+        
 
     def _select(self,cmdname,*args):
         resp=self.runcmd(cmdname,*args)
@@ -324,9 +321,14 @@ class Node(object):
     def connect(self):
         if self._sock:
             return
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((self.host, self.port))
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(self.timeout)
+            self._sock = sock
+            self._fp = sock.makefile('r')
+
         except socket.error, msg:
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
@@ -334,14 +336,11 @@ class Node(object):
                 raise NodeError("Error %s connecting %s:%s. %s." % (msg.args[0],self.host,self.port,msg.args[1]))
 
         finally:
-            sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
-            sock.settimeout(self.timeout)
-            self._sock = sock
-            self._fp = sock.makefile('r')
             if self.password:
                 if not self.runcmd("auth",self.password):
                     raise RedisError("Authentication error: Invalid password")
-            self.runcmd("select","0")
+            if self._sock:
+                self.runcmd("select","0")
 
     def disconnect(self):
         if self._sock:
