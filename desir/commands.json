@@ -67,6 +67,25 @@
     "since": "1.3.1",
     "group": "list"
   },
+  "BRPOPLPUSH": {
+    "summary": "Pop a value from a list, push it to another list and return it; or block until one is available",
+    "arguments": [
+      {
+        "name": "source",
+        "type": "key"
+      },
+      {
+        "name": "destination",
+        "type": "key"
+      },
+      {
+        "name": "timeout",
+        "type": "integer"
+      }
+    ],
+    "since": "2.1.7",
+    "group": "list"
+  },
   "CONFIG GET": {
     "summary": "Get the value of a configuration parameter",
     "arguments": [
@@ -90,6 +109,11 @@
         "type": "string"
       }
     ],
+    "since": "2.0",
+    "group": "server"
+  },
+  "CONFIG RESETSTAT": {
+    "summary": "Reset the stats returned by INFO",
     "since": "2.0",
     "group": "server"
   },
@@ -120,10 +144,6 @@
       {
         "name": "key",
         "type": "key"
-      },
-      {
-        "name": "decrement",
-        "type": "integer"
       }
     ],
     "since": "0.07",
@@ -237,6 +257,21 @@
       }
     ],
     "since": "0.07",
+    "group": "string"
+  },
+  "GETBIT": {
+    "summary": "Returns the bit value at offset in the string value stored at key",
+    "arguments": [
+      {
+        "name": "key",
+        "type": "key"
+      },
+      {
+        "name": "offset",
+        "type": "integer"
+      }
+    ],
+    "since": "2.1.8",
     "group": "string"
   },
   "GETSET": {
@@ -776,11 +811,11 @@
     "summary": "Rename a key",
     "arguments": [
       {
-        "name": "old",
+        "name": "key",
         "type": "key"
       },
       {
-        "name": "new",
+        "name": "newkey",
         "type": "key"
       }
     ],
@@ -791,11 +826,11 @@
     "summary": "Rename a key, only if the new key does not exist",
     "arguments": [
       {
-        "name": "old",
+        "name": "key",
         "type": "key"
       },
       {
-        "name": "new",
+        "name": "newkey",
         "type": "key"
       }
     ],
@@ -828,27 +863,6 @@
     "since": "1.1",
     "group": "list"
   },
-  "BRPOPLPUSH": {
-    "summary": "Remove the last element in a list, append it to another list and return it",
-    "arguments": [
-      {
-        "name": "source",
-        "type": "key"
-      },
-      {
-        "name": "destination",
-        "type": "key"
-      },
-      {
-        "name": "timeout",
-        "type": "integer"
-      }
-
-    ],
-    "since": "2.2",
-    "group": "list"
-  },
-
   "RPUSH": {
     "summary": "Append a value to a list",
     "arguments": [
@@ -964,6 +978,25 @@
     "since": "0.07",
     "group": "string"
   },
+  "SETBIT": {
+    "summary": "Sets or clears the bit at offset in the string value stored at key",
+    "arguments": [
+      {
+        "name": "key",
+        "type": "key"
+      },
+      {
+        "name": "offset",
+        "type": "integer"
+      },
+      {
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "since": "2.1.8",
+    "group": "string"
+  },
   "SETEX": {
     "summary": "Set the value and expiration of a key",
     "arguments": [
@@ -972,8 +1005,8 @@
         "type": "key"
       },
       {
-        "name": "timestamp",
-        "type": "posix time"
+        "name": "seconds",
+        "type": "integer"
       },
       {
         "name": "value",
@@ -996,6 +1029,25 @@
       }
     ],
     "since": "0.07",
+    "group": "string"
+  },
+  "SETRANGE": {
+    "summary": "Overwrite part of a string at key starting at the specified offset",
+    "arguments": [
+      {
+        "name": "key",
+        "type": "key"
+      },
+      {
+        "name": "offset",
+        "type": "integer"
+      },
+      {
+        "name": "value",
+        "type": "string"
+      }
+    ],
+    "since": "2.1.8",
     "group": "string"
   },
   "SHUTDOWN": {
@@ -1106,7 +1158,7 @@
       },
       {
         "command": "LIMIT",
-        "name": ["start", "count"],
+        "name": ["offset", "count"],
         "type": ["integer", "integer"],
         "optional": true
       },
@@ -1210,7 +1262,7 @@
         "type": "integer"
       },
       {
-        "name": "stop",
+        "name": "end",
         "type": "integer"
       }
     ],
@@ -1378,6 +1430,10 @@
         "type": "key"
       },
       {
+        "name": "numkeys",
+        "type": "integer"
+      },
+      {
         "name": "key",
         "type": "key",
         "multiple": true
@@ -1414,6 +1470,12 @@
       {
         "name": "stop",
         "type": "integer"
+      },
+      {
+        "name": "withscores",
+        "type": "enum",
+        "enum": ["WITHSCORES"],
+        "optional": true
       }
     ],
     "since": "1.1",
@@ -1433,6 +1495,18 @@
       {
         "name": "max",
         "type": "double"
+      },
+      {
+        "name": "withscores",
+        "type": "enum",
+        "enum": ["WITHSCORES"],
+        "optional": true
+      },
+      {
+        "command": "LIMIT",
+        "name": ["offset", "count"],
+        "type": ["integer", "integer"],
+        "optional": true
       }
     ],
     "since": "1.050",
@@ -1520,9 +1594,46 @@
       {
         "name": "stop",
         "type": "integer"
+      },
+      {
+        "name": "withscores",
+        "type": "enum",
+        "enum": ["WITHSCORES"],
+        "optional": true
       }
     ],
     "since": "1.1",
+    "group": "sorted_set"
+  },
+  "ZREVRANGEBYSCORE": {
+    "summary": "Return a range of members in a sorted set, by score, with scores ordered from high to low",
+    "arguments": [
+      {
+        "name": "key",
+        "type": "key"
+      },
+      {
+        "name": "max",
+        "type": "double"
+      },
+      {
+        "name": "min",
+        "type": "double"
+      },
+      {
+        "name": "withscores",
+        "type": "enum",
+        "enum": ["WITHSCORES"],
+        "optional": true
+      },
+      {
+        "command": "LIMIT",
+        "name": ["offset", "count"],
+        "type": ["integer", "integer"],
+        "optional": true
+      }
+    ],
+    "since": "2.1.6",
     "group": "sorted_set"
   },
   "ZREVRANK": {
@@ -1561,6 +1672,10 @@
       {
         "name": "destination",
         "type": "key"
+      },
+      {
+        "name": "numkeys",
+        "type": "integer"
       },
       {
         "name": "key",
