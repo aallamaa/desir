@@ -209,11 +209,14 @@ class Redis(object):
             if resp:
                 if self.safe:
                     resp=pickle.loads(resp)
-                    #resp.append(tmpname)
                     resp["srcack"]=tmpname
                 else:
                     resp=pickle.loads(resp[1])
             return resp
+
+        def unreceive(self,val):
+            if val.has_key("srcack"):
+                return self._redis.brpoplpush(val.srcack,self.name)
 
         def transfer(self,name,val,newval):
             self._redis.watch(val.tmpname)
@@ -278,6 +281,7 @@ class Redis(object):
         self.db=db
         self.password=password
         self.safe=safe
+        self.safewait=0.1
         self.Nodes=[Node(host,port,db,password,timeout)]
 
 
@@ -288,7 +292,7 @@ class Redis(object):
             try:
                 return self.Nodes[0].runcmd(cmdname,*args)
             except NodeError:
-                time.sleep(1)            
+                time.sleep(self.safewait)            
         return self.Nodes[0].runcmd(cmdname,*args)
         
 
