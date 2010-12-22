@@ -216,7 +216,7 @@ class Redis(object):
 
         def unreceive(self,val):
             if val.has_key("srcack"):
-                return self._redis.brpoplpush(val.srcack,self.name)
+                return self._redis.rpoplpush(val.srcack,self.name)
 
         def transfer(self,name,val,newval):
             self._redis.watch(val.tmpname)
