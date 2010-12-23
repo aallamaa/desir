@@ -224,6 +224,14 @@ class Redis(object):
             self.release(val)
             self.send(name,newval)
             return self._redis.execute()
+
+        def reply(self,val,newval):
+            self._redis.watch(val.tmpname)
+            self._redis.multi()
+            self.release(val)
+            self.send(val.src,newval)
+            return self._redis.execute()
+
                     
 
         def release(self,val):
