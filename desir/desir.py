@@ -203,9 +203,15 @@ class Redis(object):
         def receive(self,timeout=0):
             tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
             if self.safe:
-                resp=self._redis.brpoplpush(self.name,tmpname,timeout)
+                if timeout==-1:
+                    resp=self._redis.rpoplpush(self.name,tmpname)
+                else:
+                    resp=self._redis.brpoplpush(self.name,tmpname,timeout)
             else:
-                resp=self._redis.brpop(self.name,timeout)
+                if timeout==-1:
+                    resp=self._redis.rpop(self.name)
+                else:
+                    resp=self._redis.brpop(self.name,timeout)
             if resp:
                 if self.safe:
                     resp=pickle.loads(resp)
@@ -218,19 +224,29 @@ class Redis(object):
             if val.has_key("srcack"):
                 return self._redis.rpoplpush(val.srcack,self.name)
 
-        def transfer(self,name,val,newval):
-            self._redis.watch(val.tmpname)
-            self._redis.multi()
-            self.release(val)
-            self.send(name,newval)
-            return self._redis.execute()
+        def transfer(self,name,val,newval,force=True):
+            res=None
+            while not res:
+                self._redis.watch(val.srcack)
+                self._redis.multi()
+                self.release(val)
+                self.send(name,newval)
+                res=self._redis.execute()
+                if not force:
+                    break
+            return res
 
-        def reply(self,val,newval):
-            self._redis.watch(val.tmpname)
-            self._redis.multi()
-            self.release(val)
-            self.send(val.src,newval)
-            return self._redis.execute()
+        def reply(self,val,newval,force=True):
+            res=None
+            while not res:
+                self._redis.watch(val.srcack)
+                self._redis.multi()
+                self.release(val)
+                self.send(val.src,newval)
+                res=self._redis.execute()
+                if not force:
+                    break
+            return res
 
                     
 
