@@ -84,6 +84,8 @@ class RedisError(Exception):
 class NodeError(Exception):
     pass
 
+class ConnectorError(Exception):
+    pass
 
 class RedisInner(object):
   def __init__(self, cls):
@@ -155,7 +157,8 @@ class Redis(object):
     class Counter:
         def __init__(self, name, seed=0):
             self.name = name
-            self._redis.set(self.name,seed)
+            if seed!=None:
+                self._redis.set(self.name,seed)
 
         def __iter__(self):
             return self
@@ -175,7 +178,7 @@ class Redis(object):
         safe queue implementation under work
         CONNECTORNAME:PID:TIMESTAMP
         """
-        def __init__(self, name,ctype="",timeout=0,fifo=True,safe=False):
+        def __init__(self, name,ctype="",timeout=0,fifo=True,safe=False,secret=None):
             self.name = name
             self.timeout = timeout
             # connector queue/list set to fifo when fifo is true, and lifo when false
@@ -187,6 +190,7 @@ class Redis(object):
             # dedicated list
             self.safe = safe
             self.ctype = ctype
+            self.secret = secret
 
         def __iter__(self):
             return self
@@ -195,10 +199,17 @@ class Redis(object):
             vd=SWM(dict(src=self.name,srctype=self.ctype,dst=name,time=time.time(),val=val))
             if not val:
                 vd.update(name)
+            vp=pickle.dumps(vd)
+            if self.secret:
+                import hashlib
+                vs=hashlib.sha1()
+                vs.update(vp)
+                vs.update(self.secret)
+                vp=vs.digest()+vp
             if self.fifo:
-                return self._redis.lpush(vd.dst,pickle.dumps(vd))
+                return self._redis.lpush(vd.dst,vp)
             else:
-                return self._redis.rpush(vd.dst,pickle.dumps(vd))
+                return self._redis.rpush(vd.dst,vp)
 
         def receive(self,timeout=0):
             tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
@@ -212,12 +223,19 @@ class Redis(object):
                     resp=self._redis.rpop(self.name)
                 else:
                     resp=self._redis.brpop(self.name,timeout)
+                resp=resp[1]
             if resp:
+                if self.secret:
+                    import hashlib
+                    vs=hashlib.sha1()
+                    vs.update(resp[20:])
+                    vs.update(self.secret)
+                    if resp[:20] != vs.digest():
+                        raise ConnectorError("Digest signature failed")
+                    resp=resp[20:]
+                resp=pickle.loads(resp)
                 if self.safe:
-                    resp=pickle.loads(resp)
                     resp["srcack"]=tmpname
-                else:
-                    resp=pickle.loads(resp[1])
             return resp
 
         def unreceive(self,val):
