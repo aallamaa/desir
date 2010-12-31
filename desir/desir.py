@@ -339,7 +339,7 @@ class Redis(object):
             except NodeError:
                 time.sleep(self.safewait)
 
-        if cmdname in ["DISCARD","EXECUTE"]:
+        if cmdname in ["DISCARD","EXEC"]:
             self.transaction=False
         try:
             return self.Nodes[0].runcmd(cmdname,*args)
