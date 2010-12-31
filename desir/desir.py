@@ -325,18 +325,27 @@ class Redis(object):
         self.safe=safe
         self.safewait=0.1
         self.Nodes=[Node(host,port,db,password,timeout)]
+        self.transaction=False
 
 
 
     def runcmd(self,cmdname,*args):
         #cluster implementation to come soon after antirez publish the first cluster implementation
-        if self.safe:
+        if cmdname in ["MULTI","WATCH"]:
+            self.transaction=True
+        if self.safe and not self.transaction:
             try:
                 return self.Nodes[0].runcmd(cmdname,*args)
             except NodeError:
-                time.sleep(self.safewait)            
-        return self.Nodes[0].runcmd(cmdname,*args)
-        
+                time.sleep(self.safewait)
+
+        if cmdname in ["DISCARD","EXECUTE"]:
+            self.transaction=False
+        try:
+            return self.Nodes[0].runcmd(cmdname,*args)
+        except NodeError, e:
+            self.transaction=False
+            raise NodeError(e)
 
     def _select(self,cmdname,*args):
         resp=self.runcmd(cmdname,*args)
