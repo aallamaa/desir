@@ -326,7 +326,14 @@ class Redis(object):
         self.safewait=0.1
         self.Nodes=[Node(host,port,db,password,timeout)]
         self.transaction=False
+        self.subscribed=False
 
+    def listen(self):
+        while self.subscribed:
+            r = self.Nodes[0].parse_resp()
+            if r[0] == 'unsubscribe' and r[2] == 0:
+                self.subscribed = False
+            yield r
 
 
     def runcmd(self,cmdname,*args):
@@ -342,10 +349,14 @@ class Redis(object):
         if cmdname in ["DISCARD","EXEC"]:
             self.transaction=False
         try:
-            return self.Nodes[0].runcmd(cmdname,*args)
+            rsp = self.Nodes[0].runcmd(cmdname,*args)
+            if cmdname in ["SUBSCRIBE","PSUBSCRIBE"]:
+                self.subscribed = True
+            return rsp
         except NodeError, e:
             self.transaction=False
             raise NodeError(e)
+
 
     def _select(self,cmdname,*args):
         resp=self.runcmd(cmdname,*args)
