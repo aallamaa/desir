@@ -340,7 +340,7 @@ class Redis(object):
         #cluster implementation to come soon after antirez publish the first cluster implementation
         if cmdname in ["MULTI","WATCH"]:
             self.transaction=True
-        if self.safe and not self.transaction:
+        if self.safe and not self.transaction and not self.subscribed:
             try:
                 return self.Nodes[0].runcmd(cmdname,*args)
             except NodeError:
@@ -349,12 +349,17 @@ class Redis(object):
         if cmdname in ["DISCARD","EXEC"]:
             self.transaction=False
         try:
-            rsp = self.Nodes[0].runcmd(cmdname,*args)
+            if cmdname in ["SUBSCRIBE","PSUBSCRIBE","UNSUBSCRIBE","PUNSUBSCRIBE"]:
+                self.Nodes[0].sendcmd(cmdname,*args)
+                rsp = None
+            else:
+                rsp = self.Nodes[0].runcmd(cmdname,*args)
             if cmdname in ["SUBSCRIBE","PSUBSCRIBE"]:
                 self.subscribed = True
             return rsp
         except NodeError, e:
             self.transaction=False
+            self.subscribed=False
             raise NodeError(e)
 
 
