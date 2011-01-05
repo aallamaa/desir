@@ -122,6 +122,9 @@ class MetaRedis(type):
             _rediscmd.__dict__.update(methoddct[runcmd].__dict__)
             return _rediscmd
 
+        if name != "Redis":
+            return type.__new__(metacls, name, bases, dct)
+
         newDct = {}
         for k in redisCommands.keys():
             newDct[cmdmap.get(k.lower(),str(k.lower()))]= _wrapper(k,redisCommands[k],dct)
