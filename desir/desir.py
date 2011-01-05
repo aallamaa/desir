@@ -331,11 +331,16 @@ class Redis(object):
         self.transaction=False
         self.subscribed=False
 
-    def listen(self):
+    def listen(self,todict=False):
         while self.subscribed:
             r = self.Nodes[0].parse_resp()
             if r[0] == 'unsubscribe' and r[2] == 0:
                 self.subscribed = False
+            if todict:
+                if r[0]=="pmessage":
+                    r=dict(type=r[0],pattern=r[1],channel=r[2],data=r[3])
+                else:
+                    r=dict(type=r[0],pattern=None,channel=r[1],data=r[2])
             yield r
 
 
