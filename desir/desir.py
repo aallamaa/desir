@@ -36,6 +36,7 @@ import os
 import pickle
 import time
 import urllib2
+import random
 import json
 from pkg_resources import resource_string
 
@@ -198,8 +199,16 @@ class Redis(object):
         def __iter__(self):
             return self
 
-        def send(self,name,val=None):
-            vd=SWM(dict(src=self.name,srctype=self.ctype,dst=name,time=time.time(),val=val))
+        def sendreceive(self,name,val=None):
+            srcreply=self.name+":"+str(time.time())+str(random.random())
+            self.send(name,val,srcreply)
+            return self.receive(srcreply=srcreply)
+
+        def send(self,name,val=None,srcreply=None):
+            if srcreply:
+                vd=SWM(dict(src=srcreply,srctype=self.ctype,dst=name,time=time.time(),val=val))
+            else:
+                vd=SWM(dict(src=self.name,srctype=self.ctype,dst=name,time=time.time(),val=val))
             if not val:
                 vd.update(name)
             vp=pickle.dumps(vd)
@@ -214,19 +223,21 @@ class Redis(object):
             else:
                 return self._redis.rpush(vd.dst,vp)
 
-        def receive(self,timeout=0):
+        def receive(self,timeout=0,srcreply=None):
             tmpname="%s:%d:%d" % (self.name,os.getpid(),int(time.time()))
+            if srcreply==None:
+                srcreply=self.name
             if self.safe:
                 if timeout==-1:
-                    resp=self._redis.rpoplpush(self.name,tmpname)
+                    resp=self._redis.rpoplpush(srcreply,tmpname)
                 else:
-                    resp=self._redis.brpoplpush(self.name,tmpname,timeout)
+                    resp=self._redis.brpoplpush(srcreply,tmpname,timeout)
             else:
                 if timeout==-1:
-                    resp=self._redis.rpop(self.name)
+                    resp=self._redis.rpop(srcreply)
                 else:
-                    resp=self._redis.brpop(self.name,timeout)
-                resp=resp[1]
+                    resp=self._redis.brpop(srcreply,timeout)
+                    resp=resp[1]
             if resp:
                 if self.secret:
                     import hashlib
@@ -260,7 +271,8 @@ class Redis(object):
         def reply(self,val,newval,force=True):
             res=None
             while not res:
-                self._redis.watch(val.srcack)
+                if val.has_key("srcack"):
+                    self._redis.watch(val.srcack)
                 self._redis.multi()
                 self.release(val)
                 self.send(val.src,newval)
