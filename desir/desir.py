@@ -199,10 +199,10 @@ class Redis(object):
         def __iter__(self):
             return self
 
-        def sendreceive(self,name,val=None):
+        def sendreceive(self,name,val=None,timeout=0):
             srcreply=self.name+":"+str(time.time())+str(random.random())
             self.send(name,val,srcreply)
-            return self.receive(srcreply=srcreply)
+            return self.receive(timeout=timeout,srcreply=srcreply)
 
         def send(self,name,val=None,srcreply=None):
             if srcreply:
