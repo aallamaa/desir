@@ -36,6 +36,7 @@ import os
 import pickle
 import time
 import urllib2
+import threading
 import random
 import json
 from pkg_resources import resource_string
@@ -132,7 +133,7 @@ class MetaRedis(type):
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
-class Redis(object):
+class Redis(threading.local):
     """
     class providing a client interface to Redis
     this class is a minimalist implementation of
