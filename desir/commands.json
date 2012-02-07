@@ -1699,5 +1699,32 @@
     ],
     "since": "1.3.10",
     "group": "sorted_set"
+  },
+  "EVAL": {
+    "summary": "Eval Lua script",
+    "arguments": [
+      {
+        "name": "script",
+        "type": "string"
+      },
+      {
+        "name": "numkey",
+        "type": "integer"
+      },
+      {
+        "name": "key",
+        "type": "key",
+        "multiple": true
+      },
+      {
+        "name": "arg",
+        "type": "string",
+	"multiple": true
+      }
+    ],
+    "since": "1.3.1",
+    "group": "list"
   }
+
+
 }

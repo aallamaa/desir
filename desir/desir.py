@@ -479,10 +479,13 @@ class Node(object):
 
 
     def sendcmd(self,*args):
-        self.sendline("*%d " % (len(args)))
+        cmd=""
+        cmd+="*%d" % (len(args))
         for arg in args:
-            self.sendline("$%d" % (len(str(arg))))
-            self.sendline(str(arg))
+            cmd+="\r\n"
+            cmd+="$%d\r\n" % (len(str(arg)))
+            cmd+=str(arg)
+        self.sendline(cmd)
     
 
     def parse_resp(self):

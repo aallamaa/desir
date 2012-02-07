@@ -15,7 +15,7 @@ sdict = {
     'description' : 'Python client for Redis key-value store',
     'long_description' : 'Python client for Redis key-value store',
     'url': 'http://github.com/aallamaa/desir',
-    'download_url' : 'http://cloud.github.com/downloads/aallamaa/desir/desir-%s.tar.gz' % version,
+    'download_url' : 'http://www.xone-tech.com/desir/desir-%s.tar.gz' % version,
     'author' : 'Abdelkader ALLAM',
     'author_email' : 'abdelkader.allam@gmail.com',
     'maintainer' : 'Abdelkader ALLAM',
@@ -27,10 +27,10 @@ sdict = {
         '': ['*.json'],
     },
     'classifiers' : [
-       'Development Status :: 0.1 - Beta',
+       'Development Status :: 4 - Beta',
         'Environment :: Console',
         'Intended Audience :: Developers',
-        'License :: OSI Approved :: New BSD License',
+        'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
         'Programming Language :: Python'],
 }
