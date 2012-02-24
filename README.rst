@@ -133,3 +133,19 @@ receive from the connector as timeout was defined as 5 (seconds).
 
 You could also use d.receive() to get a result (blocking one) or
 d.receive(timeout) for non blocking if timeout is not 0.
+
+3. pub/sub
+----------
+
+To play with pub/sub:
+
+>>> import desir
+>>> r=desir.Redis()
+>>> r.subscribe("foo")
+['subscribe', 'foo', 1]
+>>>
+>>> for v in r.listen():
+...  print(v)
+...
+['message', 'foo', 'tata']
+['message', 'foo', 'toto']
