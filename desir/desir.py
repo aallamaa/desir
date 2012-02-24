@@ -117,9 +117,9 @@ class MetaRedis(type):
 
             _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower()))
             _rediscmd._json = redisCommand
-            if redisCommand.has_key("summary"):
+            if "summary" in redisCommand:
                 _doc = redisCommand["summary"]
-                if redisCommand.has_key("arguments"):
+                if "arguments" in redisCommand:
                     _doc+="\nParameters:\n"
                     for d in redisCommand["arguments"]:
                         _doc+="Name: %s,\tType: %s,\tMultiple parameter:%s\n" % (d["name"],d["type"],d.get("multiple","False"))             
@@ -136,7 +136,7 @@ class MetaRedis(type):
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
-class Redis(threading.local):
+class Redis(threading.local,metaclass=MetaRedis):
     """
     class providing a client interface to Redis
     this class is a minimalist implementation of
@@ -144,7 +144,7 @@ class Redis(threading.local):
     except for the DEL and EXEC command which is renamed delete and execute
     because it is reserved in python
     """
-    __metaclass__ = MetaRedis
+
  
     class String(object):
         """
@@ -257,7 +257,7 @@ class Redis(threading.local):
             return resp
 
         def unreceive(self,val):
-            if val.has_key("srcack"):
+            if "srcack" in val:
                 return self._redis.rpoplpush(val.srcack,self.name)
 
         def transfer(self,name,val,newval,force=True):
@@ -275,7 +275,7 @@ class Redis(threading.local):
         def reply(self,val,newval,force=True):
             res=None
             while not res:
-                if val.has_key("srcack"):
+                if "srcack" in val:
                     self._redis.watch(val.srcack)
                 self._redis.multi()
                 self.release(val)
@@ -288,7 +288,7 @@ class Redis(threading.local):
                     
 
         def release(self,val):
-            if val.has_key("srcack"):
+            if "srcack" in val:
                 return self._redis.rpop(val.srcack)
             
 
@@ -472,7 +472,7 @@ class Node(object):
     def sendline(self,message):
         self.connect()
         try:
-            self._sock.send(message+"\r\n")
+            self._sock.send(bytes(message+"\r\n","utf-8"))
         except socket.error as msg:
             self.disconnect()
             if len(msg.args)==1:
@@ -500,15 +500,18 @@ class Node(object):
             return None
         fb,resp=resp[0],resp[1:]
         if fb=="+":
-            return resp[:-2]
+            return resp[:-1]
         if fb=="-":
             raise RedisError(resp)
         if fb==":":
             return int(resp)
         if fb=="$":
-            resp=self.read(int(resp))
-            self.read(2)
-            return resp
+            if int(resp)!=-1:
+                resp=self.read(int(resp))
+                self.read(1)
+                return resp
+            else:
+                return None
         if fb=="*":
             return [self.parse_resp() for i in range(int(resp))]
 
