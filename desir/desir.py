@@ -43,7 +43,7 @@ from pkg_resources import resource_string
 
 
 redisCommands=None
-url="https://github.com/antirez/redis-doc/raw/master/commands.json"
+url="https://raw.github.com/antirez/redis-doc/master/commands.json"
 try:
     pass
     #u=urllib2.urlopen(url)
