@@ -304,7 +304,7 @@ class Redis(threading.local):
         def __repr__(self):
             return str(self.items())
 
-	def __getattr__(self, item):
+        def __getattr__(self, item):
             if item.startswith("_"):
                 return object.__getattribute__(self, item)
             resp=self._redis.hget(self._keyid,item)
@@ -313,7 +313,7 @@ class Redis(threading.local):
             else:
                 raise AttributeError("Unkown attribute %s for object %s" % (item,self._keyid))
 
-	def __setattr__(self, item, value):
+        def __setattr__(self, item, value):
             if item.startswith("_"):
                 return  object.__setattr__(self, item, value)
             else:
@@ -378,7 +378,7 @@ class Redis(threading.local):
             if cmdname in ["SUBSCRIBE","PSUBSCRIBE"]:
                 self.subscribed = True
             return rsp
-        except NodeError, e:
+        except NodeError as e:
             self.transaction=False
             self.subscribed=False
             raise NodeError(e)
@@ -421,7 +421,7 @@ class Node(object):
             self._sock = sock
             self._fp = sock.makefile('r')
 
-        except socket.error, msg:
+        except socket.error as msg:
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
             else:
@@ -447,7 +447,7 @@ class Node(object):
     def read(self,length):
         try:
             return self._fp.read(length)
-        except socket.error, msg:
+        except socket.error as msg:
             self.disconnet()
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
@@ -458,7 +458,7 @@ class Node(object):
     def readline(self):
         try:
             return self._fp.readline()
-        except socket.error, msg:
+        except socket.error as msg:
             self.disconnect()
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
@@ -470,7 +470,7 @@ class Node(object):
         self.connect()
         try:
             self._sock.send(message+"\r\n")
-        except socket.error, msg:
+        except socket.error as msg:
             self.disconnect()
             if len(msg.args)==1:
                 raise NodeError("Error connecting %s:%s. %s." % (self.host,self.port,msg.args[0]))
