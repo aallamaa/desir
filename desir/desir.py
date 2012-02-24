@@ -372,7 +372,7 @@ class Redis(threading.local):
         try:
             if cmdname in ["SUBSCRIBE","PSUBSCRIBE","UNSUBSCRIBE","PUNSUBSCRIBE"]:
                 self.Nodes[0].sendcmd(cmdname,*args)
-                rsp = None
+                rsp = self.Nodes[0].parse_resp()
             else:
                 rsp = self.Nodes[0].runcmd(cmdname,*args)
             if cmdname in ["SUBSCRIBE","PSUBSCRIBE"]:
