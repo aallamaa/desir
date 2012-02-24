@@ -35,7 +35,10 @@ import socket
 import os
 import pickle
 import time
-import urllib2
+try:
+    import urllib2
+except ImportError:
+    import urllib
 import threading
 import random
 import json
@@ -53,7 +56,7 @@ except:
 
 if not redisCommands:
     try:
-        redisCommands=json.loads(resource_string(__name__,"commands.json"))
+        redisCommands=json.loads(resource_string(__name__,"commands.json").decode("utf-8"))
     except IOError:
         raise(Exception("Error unable to load commmands json file"))
 
