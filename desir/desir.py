@@ -35,10 +35,7 @@ import socket
 import os
 import pickle
 import time
-try:
-    import urllib2
-except ImportError:
-    import urllib
+import urllib2
 import threading
 import random
 import json
@@ -56,7 +53,7 @@ except:
 
 if not redisCommands:
     try:
-        redisCommands=json.loads(resource_string(__name__,"commands.json").decode("utf-8"))
+        redisCommands=json.loads(resource_string(__name__,"commands.json"))
     except IOError:
         raise(Exception("Error unable to load commmands json file"))
 
@@ -117,9 +114,9 @@ class MetaRedis(type):
 
             _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower()))
             _rediscmd._json = redisCommand
-            if "summary" in redisCommand:
+            if redisCommand.has_key("summary"):
                 _doc = redisCommand["summary"]
-                if "arguments" in redisCommand:
+                if redisCommand.has_key("arguments"):
                     _doc+="\nParameters:\n"
                     for d in redisCommand["arguments"]:
                         _doc+="Name: %s,\tType: %s,\tMultiple parameter:%s\n" % (d["name"],d["type"],d.get("multiple","False"))             
@@ -136,7 +133,7 @@ class MetaRedis(type):
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
-class Redis(threading.local,metaclass=MetaRedis):
+class Redis(threading.local):
     """
     class providing a client interface to Redis
     this class is a minimalist implementation of
@@ -144,7 +141,7 @@ class Redis(threading.local,metaclass=MetaRedis):
     except for the DEL and EXEC command which is renamed delete and execute
     because it is reserved in python
     """
-
+    __metaclass__ = MetaRedis
  
     class String(object):
         """
@@ -257,7 +254,7 @@ class Redis(threading.local,metaclass=MetaRedis):
             return resp
 
         def unreceive(self,val):
-            if "srcack" in val:
+            if val.has_key("srcack"):
                 return self._redis.rpoplpush(val.srcack,self.name)
 
         def transfer(self,name,val,newval,force=True):
@@ -275,7 +272,7 @@ class Redis(threading.local,metaclass=MetaRedis):
         def reply(self,val,newval,force=True):
             res=None
             while not res:
-                if "srcack" in val:
+                if val.has_key("srcack"):
                     self._redis.watch(val.srcack)
                 self._redis.multi()
                 self.release(val)
@@ -288,7 +285,7 @@ class Redis(threading.local,metaclass=MetaRedis):
                     
 
         def release(self,val):
-            if "srcack" in val:
+            if val.has_key("srcack"):
                 return self._redis.rpop(val.srcack)
             
 
@@ -472,7 +469,7 @@ class Node(object):
     def sendline(self,message):
         self.connect()
         try:
-            self._sock.send(bytes(message+"\r\n","utf-8"))
+            self._sock.send(message+"\r\n")
         except socket.error as msg:
             self.disconnect()
             if len(msg.args)==1:
@@ -500,21 +497,18 @@ class Node(object):
             return None
         fb,resp=resp[0],resp[1:]
         if fb=="+":
-            return resp[:-1]
+            return resp[:-2]
         if fb=="-":
             raise RedisError(resp)
         if fb==":":
             return int(resp)
         if fb=="$":
-            if int(resp)!=-1:
-                resp=self.read(int(resp))
-                self.read(1)
-                return resp
-            else:
-                return None
+            resp=self.read(int(resp))
+            self.read(2)
+            return resp
         if fb=="*":
             return [self.parse_resp() for i in range(int(resp))]
-
+        
     def runcmd(self,cmdname,*args):
         self.sendcmd(cmdname,*args)
         return self.parse_resp()
