@@ -138,15 +138,16 @@ class MetaRedis(type):
 
 
 class SubAsync(threading.Thread):
-    def __init__(self,channel,callback):
+    def __init__(self,channel,callback,redis_param={}):
         threading.Thread.__init__(self)
         self.setDaemon(1)
         self.channel=channel
         self.callback=callback
+        self.param=redis_param
         self.start()
     def run(self):
         import desir
-        self._redis=desir.Redis()
+        self._redis=desir.Redis(**self.param)
         self._redis.subscribe(self.channel)
         for v in self._redis.listen():
             self.callback(v)

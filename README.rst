@@ -149,3 +149,21 @@ To play with pub/sub:
 ... 
 ['message', 'foo', 'tata']
 ['message', 'foo', 'toto']
+
+Javascript like call back function to handle messages received on a subscribed channel
+Python 3.2.2 (default, Feb 24 2012, 18:42:26) 
+[GCC 4.2.1 (Based on Apple Inc. build 5658) (LLVM build 2335.15.00)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import desir
+>>> def foo(p):
+...  print("I have received %s" % (str(p)))
+... 
+>>> a=desir.SubAsync("foo",foo)
+
+on another redis socket i do this:
+publish foo toto
+:2
+
+and here what i get on the console:
+>>> I have received ['message', 'foo', 'toto']
+
