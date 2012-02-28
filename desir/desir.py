@@ -136,6 +136,22 @@ class MetaRedis(type):
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
+
+class SubAsync(threading.Thread):
+    def __init__(self,channel,callback):
+        threading.Thread.__init__(self)
+        self.setDaemon(1)
+        self.channel=channel
+        self.callback=callback
+        self.start()
+    def run(self):
+        import desir
+        self._redis=desir.Redis()
+        self._redis.subscribe(self.channel)
+        for v in self._redis.listen():
+            self.callback(v)
+
+
 class Redis(threading.local,metaclass=MetaRedis):
     """
     class providing a client interface to Redis
@@ -145,7 +161,6 @@ class Redis(threading.local,metaclass=MetaRedis):
     because it is reserved in python
     """
 
- 
     class String(object):
         """
         Redis String descriptor object
