@@ -1,2 +1,2 @@
 #from desir import *
-from .desir import Node,Redis,RedisError,NodeError,ConnectorError,SWM
+from .desir import SubAsync,Node,Redis,RedisError,NodeError,ConnectorError,SWM

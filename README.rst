@@ -157,7 +157,7 @@ Python 3.2.2 (default, Feb 24 2012, 18:42:26)
 Type "help", "copyright", "credits" or "license" for more information.
 >>> import desir
 >>> def foo(p):
-...  print("I have received %s" % (str(p)))
+...  print "I have received %s" % (str(p))
 ...
 >>> a=desir.SubAsync("foo",foo)
 
