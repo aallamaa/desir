@@ -430,7 +430,12 @@ class Node(object):
     def connect(self):
         if self._sock:
             return
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        addrinfo = socket.getaddrinfo(self.host, self.port)
+        addrinfo.sort(key=lambda x: 0 if x[0] == socket.AF_INET else 1)
+        family, _, _, _, _ = addrinfo[0]
+
+        sock = socket.socket(family, socket.SOCK_STREAM)
         try:
             sock.connect((self.host, self.port))
             sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
