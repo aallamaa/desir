@@ -116,6 +116,7 @@ class MetaRedis(type):
                 return methoddct[runcmd](self, name, *args)
 
             _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower()))
+            _rediscmd.__redisname__= name
             _rediscmd._json = redisCommand
             if "summary" in redisCommand:
                 _doc = redisCommand["summary"]
