@@ -159,8 +159,8 @@ class Redis(threading.local,metaclass=MetaRedis):
     class providing a client interface to Redis
     this class is a minimalist implementation of
     http://code.google.com/p/redis/wiki/CommandReference
-    except for the DEL and EXEC command which is renamed delete and execute
-    because it is reserved in python
+    except for the DEL and EXEC command which are renamed delete and execute
+    because they are reserved names in python
     """
 
     class String(object):
