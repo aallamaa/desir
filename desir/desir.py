@@ -130,7 +130,7 @@ class MetaRedis(type):
 
         newDct = {}
         for k in redisCommands.keys():
-            newDct[cmdmap.get(k.lower(),str(k.lower()))]= _wrapper(k,redisCommands[k],dct)
+            newDct[cmdmap.get(k.lower(),str(k.lower().replace(" ","_")))]= _wrapper(k,redisCommands[k],dct)
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
@@ -502,9 +502,11 @@ class Node(object):
 
 
     def sendcmd(self,*args):
+        args2=args[0].split()
+        args2.extend(args[1:])
         cmd=""
-        cmd+="*%d" % (len(args))
-        for arg in args:
+        cmd+="*%d" % (len(args2))
+        for arg in args2:
             cmd+="\r\n"
             cmd+="$%d\r\n" % (len(str(arg)))
             cmd+=str(arg)
