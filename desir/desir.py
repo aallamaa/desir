@@ -115,7 +115,7 @@ class MetaRedis(type):
             def _rediscmd(self, *args):
                 return methoddct[runcmd](self, name, *args)
 
-            _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower()))
+            _rediscmd.__name__= cmdmap.get(name.lower(),str(name.lower().replace(" ","_")))
             _rediscmd.__redisname__= name
             _rediscmd._json = redisCommand
             if "summary" in redisCommand:
@@ -133,7 +133,7 @@ class MetaRedis(type):
 
         newDct = {}
         for k in redisCommands.keys():
-            newDct[cmdmap.get(k.lower(),str(k.lower()))]= _wrapper(k,redisCommands[k],dct)
+            newDct[cmdmap.get(k.lower(),str(k.lower().replace(" ","_")))]= _wrapper(k,redisCommands[k],dct)
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
@@ -503,9 +503,11 @@ class Node(object):
 
 
     def sendcmd(self,*args):
+        args2=args[0].split()
+        args2.extend(args[1:])
         cmd=""
-        cmd+="*%d" % (len(args))
-        for arg in args:
+        cmd+="*%d" % (len(args2))
+        for arg in args2:
             cmd+="\r\n"
             cmd+="$%d\r\n" % (len(str(arg)))
             cmd+=str(arg)
