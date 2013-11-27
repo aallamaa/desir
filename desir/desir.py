@@ -256,7 +256,7 @@ class Redis(threading.local):
                     resp=self._redis.rpop(srcreply)
                 else:
                     resp=self._redis.brpop(srcreply,timeout)
-                    resp=resp[1]
+                    resp=resp and resp[1]
             if resp:
                 if self.secret:
                     import hashlib
