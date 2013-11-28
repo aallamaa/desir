@@ -228,8 +228,8 @@ class Redis(threading.local):
                 vd=SWM(dict(src=srcreply,srctype=self.ctype,dst=name,time=time.time(),val=val))
             else:
                 vd=SWM(dict(src=self.name,srctype=self.ctype,dst=name,time=time.time(),val=val))
-            if not val:
-                vd.update(name)
+            #if not val:
+            #    vd.update(name)
             vp=pickle.dumps(vd)
             if self.secret:
                 import hashlib
