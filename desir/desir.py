@@ -40,16 +40,24 @@ import threading
 import random
 import json
 from pkg_resources import resource_string
-
+import __builtin__
 
 redisCommands=None
-url="https://raw.github.com/antirez/redis-doc/master/commands.json"
-try:
-    pass
-    #u=urllib2.urlopen(url)
-    #redisCommands=json.load(u)
-except:
-    pass
+
+def reloadCommands(url):
+    global redisCommands
+    try:
+        u=urllib2.urlopen(url)
+        redisCommands=json.load(u)
+    except urllib2.HTTPError:
+        raise(Exception("Error unable to load commmands json file"))
+
+
+if "urlCommands" in dir(__builtin__):
+    reloadCommands(__builtin__.urlCommands)
+
+#urlCommands="https://raw.github.com/antirez/redis-doc/master/commands.json"
+#reloadCommands(urlCommands) uncomment if you want to update it at each import
 
 if not redisCommands:
     try:
