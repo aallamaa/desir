@@ -43,6 +43,7 @@ import threading
 import random
 import json
 from pkg_resources import resource_string
+import builtins
 
 redisCommands=None
 
@@ -56,10 +57,10 @@ def reloadCommands(url):
         raise(Exception("Error unable to load commmands json file"))
 
 
-if "urlCommands" in dir(__builtin__):
-    reloadCommands(__builtin__.urlCommands)
+if "urlCommands" in dir(builtins):
+    reloadCommands(builtins.urlCommands)
 
-#urlCommands="https://raw.github.com/antirez/redis-doc/master/commands.json"
+#urlCommands="https://raw.githubusercontent.com/antirez/redis-doc/master/commands.json"
 #reloadCommands(urlCommands) uncomment if you want to update it at each import
 
 if not redisCommands:
@@ -131,7 +132,8 @@ class MetaRedis(type):
                 if "arguments" in redisCommand:
                     _doc+="\nParameters:\n"
                     for d in redisCommand["arguments"]:
-                        _doc+="Name: %s,\tType: %s,\tMultiple parameter:%s\n" % (d["name"],d["type"],d.get("multiple","False"))             
+                        if "name" in d:
+                            _doc+="Name: %s,\tType: %s,\tMultiple parameter:%s\n" % (d["name"],d["type"],d.get("multiple","False"))             
                 _rediscmd.__doc__  = _doc
             _rediscmd.__dict__.update(methoddct[runcmd].__dict__)
             return _rediscmd
