@@ -35,14 +35,17 @@ import socket
 import os
 import pickle
 import time
-import urllib2
+try:
+    import urllib2
+except ImportError:
+    import urllib
 import threading
 import random
 import json
 from pkg_resources import resource_string
-import __builtin__
 
 redisCommands=None
+
 
 def reloadCommands(url):
     global redisCommands
@@ -61,7 +64,7 @@ if "urlCommands" in dir(__builtin__):
 
 if not redisCommands:
     try:
-        redisCommands=json.loads(resource_string(__name__,"commands.json"))
+        redisCommands=json.loads(resource_string(__name__,"commands.json").decode("utf-8"))
     except IOError:
         raise(Exception("Error unable to load commmands json file"))
 
@@ -159,8 +162,7 @@ class SubAsync(threading.Thread):
             self.callback(v)
 
 
-
-class Redis(threading.local):
+class Redis(threading.local,metaclass=MetaRedis):
     """
     class providing a client interface to Redis
     this class is a minimalist implementation of
@@ -168,8 +170,7 @@ class Redis(threading.local):
     except for the DEL and EXEC command which are renamed delete and execute
     because they are reserved names in python
     """
-    __metaclass__ = MetaRedis
- 
+
     class String(object):
         """
         Redis String descriptor object
@@ -440,7 +441,6 @@ class Node(object):
     def connect(self):
         if self._sock:
             return
-
         addrinfo = socket.getaddrinfo(self.host, self.port)
         addrinfo.sort(key=lambda x: 0 if x[0] == socket.AF_INET else 1)
         family, _, _, _, _ = addrinfo[0]
@@ -501,7 +501,7 @@ class Node(object):
     def sendline(self,message):
         self.connect()
         try:
-            self._sock.send(message+"\r\n")
+            self._sock.send(bytes(message+"\r\n","utf-8"))
         except socket.error as msg:
             self.disconnect()
             if len(msg.args)==1:
@@ -531,18 +531,21 @@ class Node(object):
             return None
         fb,resp=resp[0],resp[1:]
         if fb=="+":
-            return resp[:-2]
+            return resp[:-1]
         if fb=="-":
             raise RedisError(resp)
         if fb==":":
             return int(resp)
         if fb=="$":
-            resp=self.read(int(resp))
-            self.read(2)
-            return resp
+            if int(resp)!=-1:
+                resp=self.read(int(resp))
+                self.read(1)
+                return resp
+            else:
+                return None
         if fb=="*":
             return [self.parse_resp() for i in range(int(resp))]
-        
+
     def runcmd(self,cmdname,*args):
         self.sendcmd(cmdname,*args)
         return self.parse_resp()
