@@ -453,7 +453,7 @@ class Node(object):
             sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
             sock.settimeout(self.timeout)
             self._sock = sock
-            self._fp = sock.makefile('r')
+            self._fp = sock.makefile('rb')
 
         except socket.error as msg:
             if len(msg.args)==1:
@@ -529,23 +529,23 @@ class Node(object):
         if not resp:
             # resp empty what is happening ? to be investigated
             return None
-        if resp[:-2] in ["$-1","*-1"]:
+        if resp[:-2] in [b"$-1",b"*-1"]:
             return None
         fb,resp=resp[0],resp[1:]
-        if fb=="+":
+        if fb==43: #+
             return resp[:-1]
-        if fb=="-":
-            raise RedisError(resp)
-        if fb==":":
+        if fb==45: #-
+            raise RedisError(resp.decode("UTF-8").strip())
+        if fb==58: #:
             return int(resp)
-        if fb=="$":
+        if fb==36: #$
             if int(resp)!=-1:
                 resp=self.read(int(resp))
-                self.read(1)
+                self.read(2)
                 return resp
             else:
                 return None
-        if fb=="*":
+        if fb==42: #*
             return [self.parse_resp() for i in range(int(resp))]
 
     def runcmd(self,cmdname,*args):
