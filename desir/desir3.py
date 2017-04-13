@@ -204,7 +204,7 @@ class Redis(threading.local,metaclass=MetaRedis):
         def __str__(self):
             return self._redis.get(self.name)
 
-        def next(self):
+        def __next__(self):
             return self._redis.incr(self.name)
     Counter=RedisInner(Counter)
 
@@ -319,7 +319,7 @@ class Redis(threading.local,metaclass=MetaRedis):
                 return self._redis.rpop(val.srcack)
             
 
-        def next(self):
+        def __next__(self):
             resp = self.receive(self.timeout)
             if resp:
                 return resp
