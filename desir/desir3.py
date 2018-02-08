@@ -503,7 +503,7 @@ class Node(object):
     def sendline(self,message):
         self.connect()
         try:
-            self._sock.send(bytes(message+"\r\n","utf-8"))
+            self._sock.send(message+b"\r\n")
         except socket.error as msg:
             self.disconnect()
             if len(msg.args)==1:
@@ -515,12 +515,17 @@ class Node(object):
     def sendcmd(self,*args):
         args2=args[0].split()
         args2.extend(args[1:])
-        cmd=""
-        cmd+="*%d" % (len(args2))
-        for arg in args2:
-            cmd+="\r\n"
-            cmd+="$%d\r\n" % (len(str(arg)))
-            cmd+=str(arg)
+        cmd=b""
+        cmd+=b"*%d" % (len(args2))
+        for carg in args2:
+            arg = None
+            if type(carg) is bytes:
+                arg = carg
+            else:
+                arg = bytes(str(carg),"utf-8")
+            cmd+=b"\r\n"
+            cmd+=b"$%d\r\n" % (len(arg))
+            cmd+=arg
         self.sendline(cmd)
     
 
