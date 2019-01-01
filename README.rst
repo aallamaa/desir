@@ -14,6 +14,11 @@ Install
 
 sudo python setup.py install
 
+Testing
+=======
+
+There is no unit-test but contribution on this are welcome.
+Because this Redis client is meta-generated, I still haven't figured out a way to unit-test it.
 
 Minimalist redis client
 ==============
