@@ -179,6 +179,8 @@ class Connector(object):
                     raise ConnectorError("Digest signature failed")
                 resp = resp[20:]
             resp = self.serializer.loads(resp)
+            if type(resp) is dict:
+                resp = SWM(resp)
             if self.safe:
                 resp["srcack"] = tmpname
         return resp
