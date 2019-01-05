@@ -173,7 +173,7 @@ publish foo toto
 and here what i get on the console:
 >>> I have received ['message', 'foo', 'toto']
 
-3. Building a worker with Connector
+4. Building a worker with Connector
 -----------------------------------
 
 Let's start by writing the worker:
