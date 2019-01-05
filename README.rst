@@ -194,10 +194,6 @@ Now let's launch a client which will request the result to the worker:
 >>> import desir
 >>> r = desir.Redis()
 >>> c = r.Connector()
->>> proxy = c.proxy()
-Traceback (most recent call last):
-  File "<stdin>", line 1, in <module>
-TypeError: proxy() missing 1 required positional argument: 'name'
 >>> proxy = c.proxy("testworker")
 >>> proxy.add(10,20,30,40,50)
 150
