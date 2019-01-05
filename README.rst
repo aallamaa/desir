@@ -172,3 +172,45 @@ publish foo toto
 
 and here what i get on the console:
 >>> I have received ['message', 'foo', 'toto']
+
+3. Building a worker with Connector
+-----------------------------------
+
+Let's start by writing the worker:
+
+>>> import desir
+>>> r = desir.Redis()
+>>> conn = r.Connector("testworker")
+>>> @conn.register
+... def add(*args):
+...     return sum(args)
+...
+>>> conn.worker()
+
+we now have a worker with function add registred to it.
+
+Now let's launch a client which will request the result to the worker:
+
+>>> import desir
+>>> r = desir.Redis()
+>>> c = r.Connector()
+>>> proxy = c.proxy()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+TypeError: proxy() missing 1 required positional argument: 'name'
+>>> proxy = c.proxy("testworker")
+>>> proxy.add(10,20,30,40,50)
+150
+
+Now if there is an exception on worker side, it raises a ConnectorError on client side with a representation of the error on worker side.
+
+>>> proxy.add(10,20,30,"STRING")
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/Users/abdelkaderallam/Code/desir/desir/sugar.py", line 72, in func
+    *args, **kwargs)
+  File "/Users/abdelkaderallam/Code/desir/desir/sugar.py", line 274, in run
+    raise ConnectorError("Error on worker side: %s" % (res.val))
+desir.sugar.ConnectorError: Error on worker side: TypeError("unsupported operand type(s) for +: 'int' and 'str'")
+
+

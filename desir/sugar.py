@@ -32,7 +32,7 @@
 
 import json
 import time
-import random
+from uuid import uuid4
 import os
 
 
@@ -58,6 +58,19 @@ class SWM(dict):
 
     def __setattr__(self, item, value):
         self.__setitem__(item, value)
+
+
+class ConnectorProxy(object):
+    def __init__(self, connector, remotename):
+        self.connector = connector
+        self.remotename = remotename
+
+    def __getattr__(self, item):
+        def func(*args, **kwargs):
+            return self.connector.run(self.remotename,
+                                      item,
+                                      *args, **kwargs)
+        return func
 
 
 class Counter:
@@ -99,9 +112,12 @@ class Connector(object):
     safe queue implementation under work
     CONNECTORNAME:PID:TIMESTAMP
     """
-    def __init__(self, name, ctype="", timeout=0, fifo=True,
+    def __init__(self, name=None, ctype="", timeout=0, fifo=True,
                  safe=False, secret=None, serializer=json):
-        self.name = name
+        if name is None:
+            self.name = str(uuid4())
+        else:
+            self.name = name
         self.timeout = timeout
         # connector queue/list set to fifo when fifo is true, lifo otherwise
         self.fifo = fifo
@@ -116,6 +132,13 @@ class Connector(object):
         self.secret = secret
         self.serializer = serializer
         self.pipeline = None
+        self.callback = {}
+
+    def register(self, func):
+        def wrapper(*args, **kwargs):
+            func(*args, **kwargs)
+        self.callback[func.__name__] = func
+        return wrapper
 
     @property
     def redis(self):
@@ -127,12 +150,13 @@ class Connector(object):
     def __iter__(self):
         return self
 
-    def sendreceive(self, name, val=None, timeout=0):
-        srcreply = self.name + ":" + str(time.time()) + str(random.random())
-        self.send(name, val, srcreply)
+    def sendreceive(self, name, val=None, timeout=0, funcname=None):
+        srcreply = "%s:%s:%s" % (self.name, str(time.time()), str(uuid4()))
+        self.send(name, val, srcreply, funcname=funcname)
         return self.receive(timeout=timeout, srcreply=srcreply)
 
-    def send(self, name, val=None, srcreply=None):
+    def send(self, name, val=None, srcreply=None, funcname=None,
+             exception=False):
         if srcreply:
             vd = SWM(src=srcreply, srctype=self.ctype,
                      dst=name, time=time.time(), val=val)
@@ -142,6 +166,10 @@ class Connector(object):
         # can't remember why this section was commented...
         # if not val:
         #    vd.update(name)
+        if funcname:
+            vd.funcname = funcname
+        if exception:
+            vd.exception = True
         vp = self.serializer.dumps(vd)
         if self.secret:
             import hashlib
@@ -202,19 +230,52 @@ class Connector(object):
                 break
         return res
 
-    def reply(self, val, newval, force=True):
+    def reply(self, val, newval, force=True, exception=False):
         res = None
         while not res:
             if "srcack" in val:
                 self.redis.watch(val.srcack)
             self.pipeline = self.redis.pipeline()
             self.release(val)
-            self.send(val.src, newval)
+            self.send(val.src, newval, exception=exception)
             res = self.pipeline.execute()
             self.pipeline = None
             if not force:
                 break
         return res
+
+    def worker(self, is_running=lambda: True):
+        while is_running():
+            res = self.receive(timeout=1)
+            if res:
+                if res.funcname in self.callback:
+                    try:
+                        resr = self.callback[res.funcname](
+                            *res.val.get("args", []),
+                            **res.val.get("kwargs", {}))
+                    except Exception as e:
+                        self.reply(res, repr(e),
+                                   exception=True)
+                        raise
+                    self.reply(res, resr)
+                else:
+                    self.reply(res,
+                               "No such function name %s" % (res.funcname),
+                               exception=True)
+
+    def run(self, name, funcname, *args, **kwargs):
+        val = dict(args=args, kwargs=kwargs)
+        res = self.sendreceive(name, val=val,
+                               timeout=self.timeout,
+                               funcname=funcname)
+        if res is None and self.timeout:
+            raise ConnectorError("Timeout")
+        if res.get("exception"):
+            raise ConnectorError("Error on worker side: %s" % (res.val))
+        return res.val
+
+    def proxy(self, name):
+        return ConnectorProxy(self, name)
 
     def release(self, val):
         if "srcack" in val:
