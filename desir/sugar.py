@@ -30,7 +30,10 @@
 #  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 #  POSSIBILITY OF SUCH DAMAGE.
 
-import json
+try:
+    import simplejson as json
+except ImportError:
+    import json
 import time
 from uuid import uuid4
 import os
