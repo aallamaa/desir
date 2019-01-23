@@ -138,10 +138,10 @@ class Connector(object):
         self.callback = {}
 
     def register(self, func):
-        def wrapper(*args, **kwargs):
-            func(*args, **kwargs)
+        # def wrapper(*args, **kwargs):
+        # func(*args, **kwargs)
         self.callback[func.__name__] = func
-        return wrapper
+        return func
 
     @property
     def redis(self):
