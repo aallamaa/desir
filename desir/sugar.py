@@ -75,6 +75,9 @@ class ConnectorProxy(object):
                                       *args, **kwargs)
         return func
 
+    def __dir__(self):
+        return self.connector.run(self.remotename, '__list__')
+
 
 class Counter:
     def __init__(self, name, seed=0):
