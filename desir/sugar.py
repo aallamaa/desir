@@ -76,7 +76,7 @@ class ConnectorProxy(object):
         return func
 
     def __dir__(self):
-        return self.connector.run(self.remotename, '__list__')
+        return self.connector.run(self.remotename, '__dir__')
 
 
 class Counter:
@@ -263,6 +263,9 @@ class Connector(object):
                         self.reply(res, repr(e),
                                    exception=True)
                         raise
+                    self.reply(res, resr)
+                elif res.funcname == '__dir__':
+                    resr = list(self.callback.keys())
                     self.reply(res, resr)
                 else:
                     self.reply(res,
