@@ -76,6 +76,12 @@ class RedisError(Exception):
 class NodeError(Exception):
     pass
 
+class SentinelErrorNoMaster(Exception):
+    pass
+
+class SentinelError(Exception):
+    pass
+
 
 class RedisInner(object):
     def __init__(self, cls):
@@ -167,6 +173,7 @@ class Redis(threading.local, metaclass=MetaRedis):
     def __node__(self):
         if self.node is None:
             if self.sentinels:
+                empty_master_result = False
                 for node in self.sentinels:
                     try:
                         res = node.runcmd('sentinel','get-master-addr-by-name', self.service_name)
@@ -177,10 +184,15 @@ class Redis(threading.local, metaclass=MetaRedis):
                             self.node = Node(
                                 self.host, self.port, self.db, self.password, self.timeout)
                             break
+                        else:
+                            empty_master_result = True
                     except NodeError:
                         continue
                 if self.node is None:
-                    raise NodeError('unable to get master from a sentinel instance')
+                    if empty_master_result:
+                        raise SentinelErrorNoMaster('unable to get master from a sentinel')
+                    else:
+                        raise SentinelError('unable to connect to any sentinel')
             else:
                 self.node = Node(
                     self.host, self.port, self.db, self.password, self.timeout)
