@@ -97,7 +97,6 @@ class RedisInner(object):
 # commands name which requires renaming
 cmdmap = {"del": "delete", "exec": "execute"}
 
-
 class MetaRedis(type):
     def __new__(metacls, name, bases, dct):
         def _wrapper(name, redisCommand, methoddct):
@@ -152,7 +151,8 @@ class Redis(threading.local, metaclass=MetaRedis):
     Hash = RedisInner(Hash)
 
     def __init__(self, host="localhost", port=6379, db=0,
-                 password=None, timeout=None, safe=False, sentinels=None):
+                 password=None, timeout=None, safe=False, sentinels=None, master=None,
+                 debug=False):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -160,10 +160,36 @@ class Redis(threading.local, metaclass=MetaRedis):
         self.password = password
         self.safe = safe
         self.safewait = 0.1
+        self.debug = debug
         if sentinels:
-            self.sentinels = [Node(host, port, db, None, timeout or DEFAULT_SENTINEL_TIMEOUT)
-                              for host,port in sentinels[0]]
-            self.service_name = sentinels[1]
+            self.sentinels = [Node(host, port, 0, None, timeout or DEFAULT_SENTINEL_TIMEOUT)
+                              for host,port in sentinels]
+            if master:
+                self.service_master = master
+            else:
+                for node in self.sentinels:
+                    res = node.runcmd('sentinel','masters')
+                    if res:
+                        self.service_master = res[0][1].decode('utf8')
+                        if debug:
+                            print('discovered master', self.service_master)
+                if not self.service_master:
+                    raise SentinelError('no master detected, please specify master')
+            new_nodes = set()
+            for node in self.sentinels:
+                res = node.runcmd('sentinel', 'sentinels', self.service_master)
+                for _val in res:
+                    val = [v.decode('utf8') for v in _val]
+                    dv = dict(zip(val[::2], val[1::2]))
+                    if not any((v.host == dv['ip']) and (v.port == int(dv['port']))
+                               for v in self.sentinels):
+                        new_nodes.add((dv['ip'], int(dv['port'])))
+            for host, port in new_nodes:
+                self.sentinels.append(
+                    Node(host, port, 0, None, timeout or DEFAULT_SENTINEL_TIMEOUT)
+                    )
+                if self.debug:
+                    print('discovered sentinel %s %d' % (host, port))
             self.node = None
         else:
             self.node = Node(self.host, self.port, self.db, self.password, self.timeout)
@@ -176,7 +202,7 @@ class Redis(threading.local, metaclass=MetaRedis):
                 empty_master_result = False
                 for node in self.sentinels:
                     try:
-                        res = node.runcmd('sentinel','get-master-addr-by-name', self.service_name)
+                        res = node.runcmd('sentinel','get-master-addr-by-name', self.service_master)
                         if (type(res) is list) and len(res) == 2:
                             bhost, bport = res
                             self.host = bhost.decode('utf8')
