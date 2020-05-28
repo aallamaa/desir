@@ -42,6 +42,7 @@ from .sugar import Counter, String, Connector, Hash
 
 redisCommands = None
 
+DEFAULT_SENTINEL_TIMEOUT = 0.1
 
 def reloadCommands(url):
     global redisCommands
@@ -145,7 +146,7 @@ class Redis(threading.local, metaclass=MetaRedis):
     Hash = RedisInner(Hash)
 
     def __init__(self, host="localhost", port=6379, db=0,
-                 password=None, timeout=None, safe=False):
+                 password=None, timeout=None, safe=False, sentinels=None):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -153,13 +154,41 @@ class Redis(threading.local, metaclass=MetaRedis):
         self.password = password
         self.safe = safe
         self.safewait = 0.1
-        self.Nodes = [Node(host, port, db, password, timeout)]
+        if sentinels:
+            self.sentinels = [Node(host, port, db, None, timeout or DEFAULT_SENTINEL_TIMEOUT)
+                              for host,port in sentinels[0]]
+            self.service_name = sentinels[1]
+            self.node = None
+        else:
+            self.node = Node(self.host, self.port, self.db, self.password, self.timeout)
         self.transaction = False
         self.subscribed = False
 
+    def __node__(self):
+        if self.node is None:
+            if self.sentinels:
+                for node in self.sentinels:
+                    try:
+                        res = node.runcmd('sentinel','get-master-addr-by-name', self.service_name)
+                        if (type(res) is list) and len(res) == 2:
+                            bhost, bport = res
+                            self.host = bhost.decode('utf8')
+                            self.port = int(bport)
+                            self.node = Node(
+                                self.host, self.port, self.db, self.password, self.timeout)
+                            break
+                    except NodeError:
+                        continue
+                if self.node is None:
+                    raise NodeError('unable to get master from a sentinel instance')
+            else:
+                self.node = Node(
+                    self.host, self.port, self.db, self.password, self.timeout)
+        return self.node
+
     def listen(self, todict=False):
         while self.subscribed:
-            r = self.Nodes[0].parse_resp()
+            r = self.__node__().parse_resp()
             if r[0] == 'unsubscribe' and r[2] == 0:
                 self.subscribed = False
             if todict:
@@ -170,33 +199,36 @@ class Redis(threading.local, metaclass=MetaRedis):
             yield r
 
     def runcmd(self, cmdname, *args):
-        # cluster implementation to come soon after antirez publish
-        # the first cluster implementation
-        # this is a comment from 2010 so i guess some work as to be done here..
+        # cluster not implemented
         if cmdname in ["MULTI", "WATCH"]:
             self.transaction = True
         if self.safe and not self.transaction and not self.subscribed:
             try:
-                return self.Nodes[0].runcmd(cmdname, *args)
+                return self.__node__().runcmd(cmdname, *args)
             except NodeError:
-                time.sleep(self.safewait)
+                if self.sentinels:
+                    self.node = None
+                else:
+                    time.sleep(self.safewait)
 
         if cmdname in ["DISCARD", "EXEC", "UNWATCH"]:
             self.transaction = False
         try:
             if cmdname in ["SUBSCRIBE", "PSUBSCRIBE",
                            "UNSUBSCRIBE", "PUNSUBSCRIBE"]:
-                self.Nodes[0].sendcmd(cmdname, *args)
-                rsp = self.Nodes[0].parse_resp()
+                self.__node__().sendcmd(cmdname, *args)
+                rsp = self.__node__().parse_resp()
             else:
-                rsp = self.Nodes[0].runcmd(cmdname, *args)
+                rsp = self.__node__().runcmd(cmdname, *args)
             if cmdname in ["SUBSCRIBE", "PSUBSCRIBE"]:
                 self.subscribed = True
             return rsp
         except NodeError as e:
+            if self.sentinels:
+                self.node = None
             self.transaction = False
             self.subscribed = False
-            raise NodeError(e)
+            raise
 
     def pipeline(self):
         self.multi()
@@ -227,6 +259,9 @@ class Node(object):
         self._fp = None
         self.db = db
 
+    def __connected__(self):
+        return bool(self._sock)
+    
     def connect(self):
         if self._sock:
             return
@@ -249,13 +284,15 @@ class Node(object):
             else:
                 raise NodeError("Error %s connecting %s:%s. %s." % (
                     msg.args[0], self.host, self.port, msg.args[1]))
-
         finally:
+            if self._sock is None:
+                raise NodeError("Unable to connect")
             if self.password:
                 if not self.runcmd("auth", self.password):
                     raise RedisError("Authentication error: Invalid password")
             if self._sock:
-                self.runcmd("select", "0")
+                if self.db:
+                    self.runcmd("select", str(self.db))
 
     def disconnect(self):
         if self._sock:
@@ -323,6 +360,7 @@ class Node(object):
     def parse_resp(self):
         resp = self.readline()
         if not resp:
+            raise NodeError('Empty response')
             # resp empty what is happening ? to be investigated
             return None
         if resp[:-2] in [b"$-1", b"*-1"]:
