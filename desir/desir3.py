@@ -151,7 +151,7 @@ class Redis(threading.local, metaclass=MetaRedis):
     Hash = RedisInner(Hash)
 
     def __init__(self, host="localhost", port=6379, db=0,
-                 password=None, timeout=None, safe=False, sentinels=None, master=None,
+                 password=None, timeout=None, safe=False, sentinels=None, service_name=None,
                  debug=False):
         self.host = host
         self.port = port
@@ -164,20 +164,20 @@ class Redis(threading.local, metaclass=MetaRedis):
         if sentinels:
             self.sentinels = [Node(host, port, 0, None, timeout or DEFAULT_SENTINEL_TIMEOUT)
                               for host,port in sentinels]
-            if master:
-                self.service_master = master
+            if service_name:
+                self.service_name = service_name
             else:
                 for node in self.sentinels:
                     res = node.runcmd('sentinel','masters')
                     if res:
-                        self.service_master = res[0][1].decode('utf8')
+                        self.service_name = res[0][1].decode('utf8')
                         if debug:
-                            print('discovered master', self.service_master)
-                if not self.service_master:
+                            print('discovered master', self.service_name)
+                if not self.service_name:
                     raise SentinelError('no master detected, please specify master')
             new_nodes = set()
             for node in self.sentinels:
-                res = node.runcmd('sentinel', 'sentinels', self.service_master)
+                res = node.runcmd('sentinel', 'sentinels', self.service_name)
                 for _val in res:
                     val = [v.decode('utf8') for v in _val]
                     dv = dict(zip(val[::2], val[1::2]))
@@ -202,7 +202,7 @@ class Redis(threading.local, metaclass=MetaRedis):
                 empty_master_result = False
                 for node in self.sentinels:
                     try:
-                        res = node.runcmd('sentinel','get-master-addr-by-name', self.service_master)
+                        res = node.runcmd('sentinel','get-master-addr-by-name', self.service_name)
                         if (type(res) is list) and len(res) == 2:
                             bhost, bport = res
                             self.host = bhost.decode('utf8')
