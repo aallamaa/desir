@@ -38,9 +38,32 @@ import urllib2
 import threading
 import random
 import json
+import hmac
+import hashlib
 from pkg_resources import resource_string
 import __builtin__
 redisCommands = None
+
+# length in bytes of the HMAC-SHA256 digest prepended to signed messages
+_MAC_SIZE = 32
+
+try:
+    # added in Python 2.7.7 / 3.3
+    from hmac import compare_digest as _consttime_eq
+except ImportError:                       # Python < 2.7.7
+    def _consttime_eq(a, b):
+        """Constant-time comparison fallback for old Python 2 versions."""
+        if len(a) != len(b):
+            return False
+        result = 0
+        for x, y in zip(bytearray(a), bytearray(b)):
+            result |= x ^ y
+        return result == 0
+
+
+def _sign(secret, payload):
+    """Return HMAC-SHA256(payload) using secret."""
+    return hmac.new(secret, payload, hashlib.sha256).digest()
 
 
 def reloadCommands(url):
@@ -48,13 +71,13 @@ def reloadCommands(url):
     try:
         u = urllib2.urlopen(url)
         redisCommands = json.load(u)
-    except urllib2.HTTPError:
-        raise(Exception("Error unable to load commmands json file"))
+    except (urllib2.URLError, ValueError) as e:
+        raise(Exception("Error unable to load commmands json file: %s" % e))
 
 
 if "urlCommands" in dir(__builtin__):
     reloadCommands(__builtin__.urlCommands)
-# urlCommands="https://raw.githubusercontent.com/antirez/redis-doc/master/commands.json"
+# urlCommands="https://raw.githubusercontent.com/redis/redis-doc/master/commands.json"
 # reloadCommands(urlCommands) uncomment if you want to update it at each import
 if not redisCommands:
     try:
@@ -253,11 +276,7 @@ class Redis(threading.local):
             #    vd.update(name)
             vp = pickle.dumps(vd)
             if self.secret:
-                import hashlib
-                vs = hashlib.sha1()
-                vs.update(vp)
-                vs.update(self.secret)
-                vp = vs.digest()+vp
+                vp = _sign(self.secret, vp) + vp
             if self.fifo:
                 return self._redis.lpush(vd.dst, vp)
             else:
@@ -265,7 +284,7 @@ class Redis(threading.local):
 
         def receive(self, timeout=0, srcreply=None):
             tmpname = "%s:%d:%d" % (self.name, os.getpid(), int(time.time()))
-            if srcreply is not None:
+            if srcreply is None:
                 srcreply = self.name
             if self.safe:
                 if timeout == -1:
@@ -280,13 +299,9 @@ class Redis(threading.local):
                     resp = resp and resp[1]
             if resp:
                 if self.secret:
-                    import hashlib
-                    vs = hashlib.sha1()
-                    vs.update(resp[20:])
-                    vs.update(self.secret)
-                    if resp[:20] != vs.digest():
+                    mac, resp = resp[:_MAC_SIZE], resp[_MAC_SIZE:]
+                    if not _consttime_eq(mac, _sign(self.secret, resp)):
                         raise ConnectorError("Digest signature failed")
-                    resp = resp[20:]
                 resp = pickle.loads(resp)
                 if self.safe:
                     resp["srcack"] = tmpname
@@ -486,7 +501,7 @@ class Node(object):
         try:
             return self._fp.read(length)
         except socket.error as msg:
-            self.disconnet()
+            self.disconnect()
             if len(msg.args) == 1:
                 raise NodeError("Error connecting %s:%s. %s." %
                                 (self.host, self.port, msg.args[0]))
@@ -509,7 +524,7 @@ class Node(object):
     def sendline(self, message):
         self.connect()
         try:
-            self._sock.send(message+"\r\n")
+            self._sock.sendall(message+"\r\n")
         except socket.error as msg:
             self.disconnect()
             if len(msg.args) == 1:
