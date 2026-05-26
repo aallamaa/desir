@@ -35,8 +35,20 @@ try:
 except ImportError:
     import json
 import time
+import hmac
+import hashlib
 from uuid import uuid4
 import os
+
+# length in bytes of the HMAC-SHA256 digest prepended to signed messages
+_MAC_SIZE = 32
+
+
+def _sign(secret, payload):
+    """Return HMAC-SHA256(payload) using secret (bytes or str)."""
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+    return hmac.new(secret, payload, hashlib.sha256).digest()
 
 
 class ConnectorError(Exception):
@@ -92,7 +104,10 @@ class Counter:
         return int(self._redis.get(self.name))
 
     def __str__(self):
-        return self._redis.get(self.name)
+        val = self._redis.get(self.name)
+        if isinstance(val, bytes):
+            val = val.decode("utf-8")
+        return str(val)
 
     def __next__(self):
         return self._redis.incr(self.name)
@@ -177,12 +192,10 @@ class Connector(object):
         if exception:
             vd.exception = True
         vp = self.serializer.dumps(vd)
+        if isinstance(vp, str):
+            vp = vp.encode("utf-8")
         if self.secret:
-            import hashlib
-            vs = hashlib.sha1()
-            vs.update(vp)
-            vs.update(self.secret)
-            vp = vs.digest() + vp
+            vp = _sign(self.secret, vp) + vp
         if self.fifo:
             return self.redis.lpush(vd.dst, vp)
         else:
@@ -205,13 +218,9 @@ class Connector(object):
                 resp = resp and resp[1]
         if resp:
             if self.secret:
-                import hashlib
-                vs = hashlib.sha1()
-                vs.update(resp[20:])
-                vs.update(self.secret)
-                if resp[:20] != vs.digest():
+                mac, resp = resp[:_MAC_SIZE], resp[_MAC_SIZE:]
+                if not hmac.compare_digest(mac, _sign(self.secret, resp)):
                     raise ConnectorError("Digest signature failed")
-                resp = resp[20:]
             resp = self.serializer.loads(resp)
             if type(resp) is dict:
                 resp = SWM(resp)
@@ -260,9 +269,10 @@ class Connector(object):
                             *res.val.get("args", []),
                             **res.val.get("kwargs", {}))
                     except Exception as e:
-                        self.reply(res, repr(e),
-                                   exception=True)
-                        raise
+                        # report the failure to the caller but keep the
+                        # worker loop alive for subsequent requests
+                        self.reply(res, repr(e), exception=True)
+                        continue
                     self.reply(res, resr)
                 elif res.funcname == '__dir__':
                     resr = list(self.callback.keys())
@@ -303,7 +313,7 @@ class Hash(object):
         self._keyid = name
 
     def __repr__(self):
-        return str(self.items())
+        return str(list(self.items()))
 
     def __getattr__(self, item):
         if item.startswith("_"):
