@@ -12,10 +12,14 @@ wire protocol:
   ``help(r.get)`` and tab-completion just work, and new Redis commands appear
   automatically when the description file is refreshed.
 * **Redis types are wrapped as native Python idioms** — a counter you can
-  iterate (``for i in counter``), a hash that behaves like an object
-  (``h.name = "Alice"``), a string exposed as a descriptor, and a message
+  iterate, compare and do arithmetic with (``c += 5``), a hash that behaves
+  like both an object (``h.name``) and a mapping (``h["name"]``, ``"name" in
+  h``, ``len(h)``), a string exposed as a descriptor, and a message
   ``Connector`` offering Erlang-style ``send`` / ``receive`` plus transparent
   remote-procedure calls through proxy objects.
+* **Context managers for every resource** — connections, transactions,
+  distributed locks, and pub/sub subscriptions all support the ``with``
+  statement so resources are never left open accidentally.
 * **Minimalist** — a thin, dependency-free core (pure standard library).
 
 *Desir* is a permutation of *Redis*, and a nod to the desire of antirez for
@@ -182,6 +186,22 @@ iterate, share across processes/threads/hosts, and read with ``int()`` /
 
 Pass ``seed=None`` to attach to an existing counter without resetting it.
 
+Counters also support arithmetic and comparison operators:
+
+.. code-block:: python
+
+    >>> c = r.Counter("hits", seed=0)
+    >>> c += 10                            # INCRBY 10
+    >>> c -= 3                             # DECRBY 3
+    >>> int(c)
+    7
+    >>> c == 7
+    True
+    >>> c > 5
+    True
+    >>> len(c)                             # same as int(c)
+    7
+
 Hash — a Redis hash as a Python object
 --------------------------------------
 
@@ -204,6 +224,22 @@ A ``Hash`` maps attribute access to ``HGET`` / ``HSET`` and offers the usual
         ...
     AttributeError: Unkown attribute missing for object user:1
 
+``Hash`` also implements the full mapping protocol — attribute access and item
+access work side-by-side:
+
+.. code-block:: python
+
+    >>> user["email"] = "alice@example.com"   # HSET
+    >>> user["email"]                          # HGET
+    b'alice@example.com'
+    >>> "email" in user                        # HEXISTS
+    True
+    >>> len(user)                              # HLEN
+    3
+    >>> del user["email"]                      # HDEL
+    >>> "email" in user
+    False
+
 String — a Redis string as a descriptor
 ----------------------------------------
 
@@ -219,6 +255,82 @@ classes:
     >>> cfg.title = "Hello"                # -> SET site:title Hello
     >>> r.get("site:title")
     b'Hello'
+
+
+Context managers
+================
+
+Every resource in desir supports the ``with`` statement.
+
+Connection lifecycle
+--------------------
+
+Use ``Redis`` as a context manager to ensure the connection is closed when
+you leave the block:
+
+.. code-block:: python
+
+    >>> with desir.Redis(host="redis-prod") as r:
+    ...     r.set("key", "value")
+    ...     r.get("key")
+    b'value'
+    # socket is disconnected on exit
+
+Transactions
+------------
+
+``redis.transaction()`` wraps a block in ``MULTI`` / ``EXEC``.  If an
+exception propagates out of the block the transaction is automatically
+discarded (``DISCARD``) so it is never left open:
+
+.. code-block:: python
+
+    >>> with r.transaction():
+    ...     r.set("balance", 100)
+    ...     r.decrby("balance", 30)
+    ...     r.incrby("reserve", 30)
+    # all three commands are sent as one atomic EXEC
+
+    >>> try:
+    ...     with r.transaction():
+    ...         r.set("x", 1)
+    ...         raise RuntimeError("abort!")
+    ... except RuntimeError:
+    ...     pass
+    # DISCARD was called; r.get("x") is whatever it was before
+
+Distributed locks
+-----------------
+
+``redis.lock(name, ttl=30)`` acquires a server-side lock using
+``SET … NX EX``.  The lock is released on exit only if the token still
+matches (safe against expiry races where a second holder already took
+over).  ``LockError`` is raised immediately if the lock is already held:
+
+.. code-block:: python
+
+    >>> with r.lock("payment:user:42", ttl=30):
+    ...     process_payment()
+    # DEL is called on clean exit; also released on exception
+
+    >>> with r.lock("job"):
+    ...     with r.lock("job"):       # same key — already held
+    ...         pass
+    desir.LockError: Could not acquire lock: 'job'
+
+Subscriptions
+-------------
+
+``redis.subscription(*channels)`` subscribes on entry and automatically
+calls ``UNSUBSCRIBE`` on exit, whether the block ends normally or via an
+exception:
+
+.. code-block:: python
+
+    >>> with r.subscription("news", "sports") as messages:
+    ...     for msg in messages:
+    ...         handle(msg)
+    # UNSUBSCRIBE "news" "sports" called automatically
 
 
 Message passing with Connector
