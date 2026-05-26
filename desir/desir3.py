@@ -178,7 +178,7 @@ class Redis(threading.local, metaclass=MetaRedis):
 
     def __init__(self, host="localhost", port=6379, db=0,
                  password=None, timeout=None, safe=False, sentinels=None, service_name=None,
-                 debug=False):
+                 debug=False, match_version=False):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -224,6 +224,8 @@ class Redis(threading.local, metaclass=MetaRedis):
             self.node = Node(self.host, self.port, self.db, self.password, self.timeout)
         self.transaction = False
         self.subscribed = False
+        if match_version:
+            self._apply_version_match()
 
     def __node__(self):
         if self.node is None:
@@ -340,25 +342,34 @@ class Redis(threading.local, metaclass=MetaRedis):
                 return meta
         return None
 
-    @classmethod
-    def supports(cls, command, version):
-        """True if ``command`` exists at the given server ``version`` (a tuple
-        or version string). Commands with no ``since`` are assumed available;
-        commands absent from the description file are considered unsupported."""
-        if isinstance(version, str):
+    def _resolve_version(self, version):
+        """Normalise a version argument to a tuple, defaulting to the
+        connected server's version when ``None``."""
+        if version is None:
+            version = self.server_version()
+        elif isinstance(version, str):
             version = parse_version(version)
-        meta = cls.command_json(command)
+        if version is None:
+            raise RedisError("unable to determine the Redis server version")
+        return version
+
+    def supports(self, command, version=None):
+        """True if ``command`` exists at ``version`` (defaults to the connected
+        server's version, may be a tuple or version string). Accepts the Redis
+        name or the Python method name; commands with no ``since`` are assumed
+        available; commands absent from the description file are unsupported."""
+        version = self._resolve_version(version)
+        meta = self.command_json(command)
         if meta is None:
             return False
         since = meta.get("since")
         return since is None or parse_version(since) <= version
 
-    @classmethod
-    def commands_by_availability(cls, version):
+    def commands_by_availability(self, version=None):
         """Split every known command method name into ``(available,
-        unsupported)`` lists for the given ``version`` (tuple or string)."""
-        if isinstance(version, str):
-            version = parse_version(version)
+        unsupported)`` lists for ``version`` (defaults to the connected
+        server's version, may be a tuple or version string)."""
+        version = self._resolve_version(version)
         available, unsupported = [], []
         for name, meta in redisCommands.items():
             method = command_method_name(name)
@@ -372,16 +383,44 @@ class Redis(threading.local, metaclass=MetaRedis):
     def available_commands(self, version=None):
         """Sorted list of command method names available at ``version``
         (defaults to the connected server's version)."""
-        if version is None:
-            version = self.server_version()
         return self.commands_by_availability(version)[0]
 
     def unsupported_commands(self, version=None):
         """Sorted list of command method names NOT available at ``version``
         (defaults to the connected server's version)."""
-        if version is None:
-            version = self.server_version()
         return self.commands_by_availability(version)[1]
+
+    @staticmethod
+    def _make_unsupported(method, since, version):
+        sv = ".".join(str(p) for p in version)
+
+        def _raise(*args, **kwargs):
+            raise RedisError(
+                "command %r requires Redis >= %s but the server is %s "
+                "(client created with match_version=True)"
+                % (method, since, sv))
+
+        _raise.__name__ = method
+        _raise.__doc__ = (
+            "Unavailable on this server: requires Redis >= %s (server is %s)."
+            % (since, sv))
+        return _raise
+
+    def _apply_version_match(self):
+        """Shadow every command newer than the server with a method that
+        raises a helpful ``RedisError`` when called."""
+        version = self.server_version()
+        if version is None:
+            raise RedisError(
+                "match_version=True but the server version "
+                "could not be determined")
+        self._server_version = version
+        for name, meta in redisCommands.items():
+            since = meta.get("since")
+            if since is not None and parse_version(since) > version:
+                method = command_method_name(name)
+                setattr(self, method,
+                        self._make_unsupported(method, since, version))
 
 
 class Node(object):
