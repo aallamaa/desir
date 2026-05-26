@@ -276,12 +276,35 @@ you leave the block:
     b'value'
     # socket is disconnected on exit
 
-Transactions
-------------
+Pipelines — non-atomic batching
+--------------------------------
 
-``redis.transaction()`` wraps a block in ``MULTI`` / ``EXEC``.  If an
-exception propagates out of the block the transaction is automatically
-discarded (``DISCARD``) so it is never left open:
+``redis.pipeline()`` buffers commands and sends them all in a **single
+network round-trip** when ``pipe.execute()`` is called.  No ``MULTI``/``EXEC``
+is involved — commands are executed independently on the server and are **not**
+atomic.  Results are returned as a list in the order the commands were issued:
+
+.. code-block:: python
+
+    >>> with r.pipeline() as pipe:
+    ...     pipe.set("a", 1)
+    ...     pipe.incr("a")
+    ...     pipe.get("a")
+    ...     results = pipe.execute()
+    >>> results
+    [b'OK', 2, b'2']
+
+If ``execute()`` is not called explicitly, the buffer is flushed automatically
+on exit (results discarded).  On exception the buffer is cleared without
+sending anything.
+
+Transactions — atomic MULTI/EXEC
+----------------------------------
+
+``redis.transaction()`` wraps a block in ``MULTI`` / ``EXEC``.  Commands are
+queued on the server and executed atomically — no other client can interleave
+between them.  If an exception propagates out of the block the transaction is
+automatically discarded (``DISCARD``) so it is never left open:
 
 .. code-block:: python
 

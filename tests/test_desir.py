@@ -427,7 +427,8 @@ class TestConnector:
         assert msg.val == "job"
         assert "srcack" in msg  # stashed on a dedicated ack list
         # releasing removes it from the in-flight list
-        worker.pipeline = worker.redis.pipeline()
+        worker._redis.multi()
+        worker.pipeline = worker._redis
         worker.release(msg)
         worker.pipeline.execute()
         worker.pipeline = None
@@ -628,11 +629,15 @@ class TestRedisInternals:
         assert redis.runcmdon(None, "ping") in ("PONG", b"PONG")
 
     def test_pipeline_method(self, redis):
-        assert redis.pipeline() is redis
-        redis.set("pk", "pv")
-        res = redis.execute()
-        assert res[0] in ("OK", b"OK")
-        assert redis.get("pk") == b"pv"
+        redis.delete("test:pipeline:a", "test:pipeline:b")
+        with redis.pipeline() as pipe:
+            pipe.set("test:pipeline:a", "1")
+            pipe.set("test:pipeline:b", "2")
+            results = pipe.execute()
+        assert results[0] in ("OK", b"OK")
+        assert results[1] in ("OK", b"OK")
+        assert redis.get("test:pipeline:a") == b"1"
+        assert redis.get("test:pipeline:b") == b"2"
 
     def test_node_connected_lifecycle(self, redis):
         redis.ping()
@@ -688,6 +693,83 @@ class TestReloadCommands:
             desir.desir3.urllib.request, "urlopen", boom)
         with pytest.raises(Exception):
             desir.desir3.reloadCommands("http://example/commands.json")
+
+
+# ---------------------------------------------------------------------------
+# Non-atomic pipeline
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestPipeline:
+    def test_basic_set_get(self, redis):
+        redis.delete("test:pipe:a", "test:pipe:b")
+        with redis.pipeline() as pipe:
+            pipe.set("test:pipe:a", "hello")
+            pipe.set("test:pipe:b", "world")
+            results = pipe.execute()
+        assert results[0] in ("OK", b"OK")
+        assert results[1] in ("OK", b"OK")
+        assert redis.get("test:pipe:a") == b"hello"
+        assert redis.get("test:pipe:b") == b"world"
+
+    def test_mixed_reads_and_writes(self, redis):
+        redis.set("test:pipe:x", "42")
+        with redis.pipeline() as pipe:
+            pipe.get("test:pipe:x")
+            pipe.incr("test:pipe:x")
+            pipe.get("test:pipe:x")
+            results = pipe.execute()
+        assert results[0] == b"42"
+        assert results[1] == 43
+        assert results[2] == b"43"
+
+    def test_auto_flush_on_exit(self, redis):
+        redis.delete("test:pipe:auto")
+        with redis.pipeline() as pipe:
+            pipe.set("test:pipe:auto", "flushed")
+        # no explicit execute() — should auto-flush
+        assert redis.get("test:pipe:auto") == b"flushed"
+
+    def test_buffer_cleared_on_exception(self, redis):
+        redis.set("test:pipe:exc", "original")
+        try:
+            with redis.pipeline() as pipe:
+                pipe.set("test:pipe:exc", "changed")
+                raise RuntimeError("abort")
+        except RuntimeError:
+            pass
+        # commands were buffered but NOT sent (buffer cleared on exception)
+        assert redis.get("test:pipe:exc") == b"original"
+
+    def test_pipeline_is_not_atomic(self, redis):
+        """pipeline() does not use MULTI/EXEC — no atomicity guarantee.
+        This test verifies the server processes commands independently
+        (no QUEUED responses, results come back directly)."""
+        redis.set("test:pipe:na", "0")
+        with redis.pipeline() as pipe:
+            pipe.incr("test:pipe:na")
+            pipe.incr("test:pipe:na")
+            results = pipe.execute()
+        # Results are actual values, not "QUEUED"
+        assert results == [1, 2]
+
+    def test_empty_pipeline_returns_empty_list(self, redis):
+        with redis.pipeline() as pipe:
+            results = pipe.execute()
+        assert results == []
+
+    def test_pipeline_and_transaction_are_independent(self, redis):
+        """Both methods coexist; pipeline is non-atomic, transaction is atomic."""
+        redis.delete("test:pipe:ind")
+        # pipeline — no MULTI/EXEC
+        with redis.pipeline() as pipe:
+            pipe.set("test:pipe:ind", "pipe")
+            pipe.execute()
+        assert redis.get("test:pipe:ind") == b"pipe"
+        # transaction — MULTI/EXEC
+        with redis.transaction():
+            redis.set("test:pipe:ind", "txn")
+        assert redis.get("test:pipe:ind") == b"txn"
 
 
 # ---------------------------------------------------------------------------

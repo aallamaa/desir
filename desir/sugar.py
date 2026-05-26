@@ -262,7 +262,8 @@ class Connector(object):
         res = None
         while not res:
             self.redis.watch(val.srcack)
-            self.pipeline = self.redis.pipeline()
+            self._redis.multi()
+            self.pipeline = self._redis
             self.release(val)
             self.send(name, newval)
             res = self.pipeline.execute()
@@ -276,7 +277,8 @@ class Connector(object):
         while not res:
             if "srcack" in val:
                 self.redis.watch(val.srcack)
-            self.pipeline = self.redis.pipeline()
+            self._redis.multi()
+            self.pipeline = self._redis
             self.release(val)
             self.send(val.src, newval, exception=exception)
             res = self.pipeline.execute()

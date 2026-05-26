@@ -137,6 +137,73 @@ class _TransactionContext:
             self._r.execute()
 
 
+class _Pipeline:
+    """Non-atomic command buffer returned inside a ``with redis.pipeline():`` block.
+
+    Commands called on a ``_Pipeline`` are *not* sent to the server immediately.
+    Instead they accumulate in an internal list.  When :meth:`execute` is called
+    (explicitly, or automatically on ``__exit__``), all commands are flushed in
+    a single network round-trip and their responses are returned as a list.
+
+    No ``MULTI``/``EXEC`` wrapping is applied — use :meth:`Redis.transaction`
+    for atomic execution.
+
+    Attribute access works exactly like on a :class:`Redis` instance: every
+    generated command method is available, identified by its ``__redisname__``
+    attribute.
+    """
+
+    def __init__(self, redis):
+        self._redis = redis
+        self._commands = []   # list of (redis_cmdname, args)
+
+    def __getattr__(self, item):
+        method = getattr(type(self._redis), item, None)
+        if callable(method) and hasattr(method, '__redisname__'):
+            cmdname = method.__redisname__
+
+            def buffered(*args):
+                self._commands.append((cmdname, args))
+                return self   # chainable
+
+            buffered.__name__ = item
+            return buffered
+        raise AttributeError(
+            "%r has no attribute %r" % (type(self).__name__, item))
+
+    def execute(self):
+        """Flush all buffered commands and return a list of their responses."""
+        if not self._commands:
+            return []
+        node = self._redis.__node__()
+        for cmdname, args in self._commands:
+            node.sendcmd(cmdname, *args)
+        results = [node.parse_resp() for _ in self._commands]
+        self._commands.clear()
+        return results
+
+
+class _PipelineContext:
+    """Context manager returned by :meth:`Redis.pipeline`.
+
+    Yields a :class:`_Pipeline` on entry.  On a clean exit any still-buffered
+    commands are flushed automatically (results discarded).  On an exception
+    the buffer is cleared without sending.
+    """
+
+    def __init__(self, redis):
+        self._pipe = _Pipeline(redis)
+
+    def __enter__(self):
+        return self._pipe
+
+    def __exit__(self, exc_type, *_):
+        if exc_type:
+            self._pipe._commands.clear()   # discard buffered commands
+        elif self._pipe._commands:
+            self._pipe.execute()           # auto-flush remaining commands
+
+
 class _SubscriptionContext:
     """Context manager returned by ``Redis.subscription()``.
 
@@ -404,8 +471,27 @@ class Redis(threading.local, metaclass=MetaRedis):
             raise
 
     def pipeline(self):
-        self.multi()
-        return self
+        """Return a context manager for non-atomic command batching.
+
+        Commands called on the yielded :class:`_Pipeline` object are buffered
+        and sent to the server in a **single network round-trip** when
+        :meth:`~_Pipeline.execute` is called or the block exits.  No
+        ``MULTI``/``EXEC`` wrapping is applied — commands are *not* atomic.
+        Use :meth:`transaction` when you need atomicity.
+
+        Example::
+
+            with redis.pipeline() as pipe:
+                pipe.set("a", 1)
+                pipe.set("b", 2)
+                results = pipe.execute()   # [b'OK', b'OK']
+
+            # auto-flush on exit if execute() was not called explicitly:
+            with redis.pipeline() as pipe:
+                pipe.incr("hits")
+                pipe.incr("hits")
+        """
+        return _PipelineContext(self)
 
     def _select(self, cmdname, *args):
         resp = self.runcmd(cmdname, *args)
