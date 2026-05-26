@@ -39,7 +39,7 @@ import threading
 import json
 from importlib.resources import files
 import builtins
-from .sugar import Counter, String, Connector, Hash
+from .sugar import Counter, String, Connector, Hash, Lock, LockError
 
 redisCommands = None
 
@@ -115,6 +115,52 @@ class RedisInner(object):
         return Wrapper
 
 
+class _TransactionContext:
+    """Context manager returned by ``Redis.transaction()``.
+
+    Calls ``MULTI`` on entry and ``EXEC`` on clean exit, or ``DISCARD``
+    when an exception is propagating, so the transaction is never left
+    open accidentally.
+    """
+
+    def __init__(self, redis):
+        self._r = redis
+
+    def __enter__(self):
+        self._r.multi()
+        return self._r
+
+    def __exit__(self, exc_type, *_):
+        if exc_type:
+            self._r.discard()
+        else:
+            self._r.execute()
+
+
+class _SubscriptionContext:
+    """Context manager returned by ``Redis.subscription()``.
+
+    Subscribes to the given channels on entry and unsubscribes from all
+    of them on exit, whether the body exits normally or via an exception.
+    Yields the ``listen()`` generator so the body can iterate over
+    incoming messages.
+    """
+
+    def __init__(self, redis, channels):
+        self._r = redis
+        self._channels = channels
+
+    def __enter__(self):
+        self._r.subscribe(*self._channels)
+        return self._r.listen()
+
+    def __exit__(self, *_):
+        try:
+            self._r.unsubscribe(*self._channels)
+        except Exception:
+            pass
+
+
 # commands name which requires renaming
 cmdmap = {"del": "delete", "exec": "execute"}
 
@@ -175,6 +221,7 @@ class Redis(threading.local, metaclass=MetaRedis):
     Counter = RedisInner(Counter)
     Connector = RedisInner(Connector)
     Hash = RedisInner(Hash)
+    Lock = RedisInner(Lock)
 
     def __init__(self, host="localhost", port=6379, db=0,
                  password=None, timeout=None, safe=False, sentinels=None, service_name=None,
@@ -222,10 +269,65 @@ class Redis(threading.local, metaclass=MetaRedis):
             self.node = None
         else:
             self.node = Node(self.host, self.port, self.db, self.password, self.timeout)
-        self.transaction = False
+        self._in_transaction = False
         self.subscribed = False
         if match_version:
             self._apply_version_match()
+
+    # -- connection context manager ------------------------------------------
+
+    def __enter__(self):
+        """Support ``with Redis(...) as r:`` — returns self."""
+        return self
+
+    def __exit__(self, *_):
+        """Disconnect when leaving the ``with`` block."""
+        if self.node:
+            self.node.disconnect()
+
+    # -- transaction context manager -----------------------------------------
+
+    def transaction(self):
+        """Return a context manager that wraps commands in a ``MULTI``/``EXEC``
+        block.  On exception the transaction is automatically discarded.
+
+        Example::
+
+            with redis.transaction():
+                redis.set("a", 1)
+                redis.incr("a")
+        """
+        return _TransactionContext(self)
+
+    # -- subscription context manager ----------------------------------------
+
+    def subscription(self, *channels):
+        """Return a context manager that subscribes to *channels* and
+        automatically unsubscribes when the block exits.
+
+        Example::
+
+            with redis.subscription("news", "sports") as messages:
+                for msg in messages:
+                    handle(msg)
+        """
+        return _SubscriptionContext(self, channels)
+
+    # -- distributed lock ----------------------------------------------------
+
+    def lock(self, name, ttl=30):
+        """Return a context manager that acquires a distributed lock on *name*
+        using ``SET NX EX``.  Raises ``LockError`` if the lock is already
+        held.  Releases the lock on exit only if the token still matches
+        (safe against TTL expiry races).
+
+        Example::
+
+            with redis.lock("payment:user:42", ttl=30):
+                process_payment()
+        """
+        lock = self.Lock(name, ttl=ttl)
+        return lock
 
     def __node__(self):
         if self.node is None:
@@ -272,8 +374,8 @@ class Redis(threading.local, metaclass=MetaRedis):
     def runcmd(self, cmdname, *args):
         # cluster not implemented
         if cmdname in ["MULTI", "WATCH"]:
-            self.transaction = True
-        if self.safe and not self.transaction and not self.subscribed:
+            self._in_transaction = True
+        if self.safe and not self._in_transaction and not self.subscribed:
             try:
                 return self.__node__().runcmd(cmdname, *args)
             except NodeError:
@@ -283,7 +385,7 @@ class Redis(threading.local, metaclass=MetaRedis):
                     time.sleep(self.safewait)
 
         if cmdname in ["DISCARD", "EXEC", "UNWATCH"]:
-            self.transaction = False
+            self._in_transaction = False
         try:
             if cmdname in ["SUBSCRIBE", "PSUBSCRIBE",
                            "UNSUBSCRIBE", "PUNSUBSCRIBE"]:
@@ -297,7 +399,7 @@ class Redis(threading.local, metaclass=MetaRedis):
         except NodeError as e:
             if self.sentinels:
                 self.node = None
-            self.transaction = False
+            self._in_transaction = False
             self.subscribed = False
             raise
 

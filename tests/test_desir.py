@@ -18,7 +18,7 @@ import time
 import pytest
 
 import desir
-from desir.sugar import _sign, _MAC_SIZE, SWM, ConnectorError
+from desir.sugar import _sign, _MAC_SIZE, SWM, ConnectorError, LockError
 
 from conftest import requires_redis
 
@@ -688,3 +688,224 @@ class TestReloadCommands:
             desir.desir3.urllib.request, "urlopen", boom)
         with pytest.raises(Exception):
             desir.desir3.reloadCommands("http://example/commands.json")
+
+
+# ---------------------------------------------------------------------------
+# Counter arithmetic operators
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestCounterOperators:
+    def test_iadd(self, redis):
+        c = redis.Counter("test:counter:iadd", seed=0)
+        c += 5
+        assert int(c) == 5
+
+    def test_iadd_accumulates(self, redis):
+        c = redis.Counter("test:counter:iadd2", seed=10)
+        c += 3
+        c += 2
+        assert int(c) == 15
+
+    def test_isub(self, redis):
+        c = redis.Counter("test:counter:isub", seed=10)
+        c -= 4
+        assert int(c) == 6
+
+    def test_len(self, redis):
+        c = redis.Counter("test:counter:len", seed=7)
+        assert len(c) == 7
+
+    def test_eq(self, redis):
+        c = redis.Counter("test:counter:eq", seed=3)
+        assert c == 3
+        assert not (c == 4)
+
+    def test_lt(self, redis):
+        c = redis.Counter("test:counter:lt", seed=5)
+        assert c < 6
+        assert not (c < 5)
+
+    def test_le(self, redis):
+        c = redis.Counter("test:counter:le", seed=5)
+        assert c <= 5
+        assert c <= 6
+        assert not (c <= 4)
+
+    def test_gt(self, redis):
+        c = redis.Counter("test:counter:gt", seed=5)
+        assert c > 4
+        assert not (c > 5)
+
+    def test_ge(self, redis):
+        c = redis.Counter("test:counter:ge", seed=5)
+        assert c >= 5
+        assert c >= 4
+        assert not (c >= 6)
+
+
+# ---------------------------------------------------------------------------
+# Hash full mapping protocol
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestHashMapping:
+    def test_setitem_getitem(self, redis):
+        redis.delete("test:hash:map")
+        h = redis.Hash("test:hash:map")
+        h["field"] = "value"
+        assert h["field"] == b"value"
+
+    def test_contains_true(self, redis):
+        redis.delete("test:hash:contains")
+        h = redis.Hash("test:hash:contains")
+        h["k"] = "v"
+        assert "k" in h
+
+    def test_contains_false(self, redis):
+        redis.delete("test:hash:notcontains")
+        h = redis.Hash("test:hash:notcontains")
+        assert "missing" not in h
+
+    def test_delitem(self, redis):
+        redis.delete("test:hash:del")
+        h = redis.Hash("test:hash:del")
+        h["x"] = "1"
+        assert "x" in h
+        del h["x"]
+        assert "x" not in h
+
+    def test_len(self, redis):
+        redis.delete("test:hash:len")
+        h = redis.Hash("test:hash:len")
+        assert len(h) == 0
+        h["a"] = "1"
+        h["b"] = "2"
+        assert len(h) == 2
+
+    def test_item_and_attr_access_coexist(self, redis):
+        redis.delete("test:hash:both")
+        h = redis.Hash("test:hash:both")
+        h["name"] = "Alice"
+        assert h["name"] == b"Alice"
+        assert h.name == b"Alice"
+
+
+# ---------------------------------------------------------------------------
+# Connection context manager  (with redis:)
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestConnectionContext:
+    def test_enter_returns_self(self, make_redis):
+        r = make_redis()
+        with r as r2:
+            assert r2 is r
+            r2.set("test:ctx:conn", "ok")
+
+    def test_exit_disconnects(self, make_redis):
+        r = make_redis()
+        with r:
+            r.set("test:ctx:disc", "1")
+        # node socket should be closed after exit
+        assert r.node._sock is None
+
+    def test_commands_work_inside_block(self, make_redis):
+        with make_redis() as r:
+            r.set("test:ctx:cmds", "hello")
+            assert r.get("test:ctx:cmds") == b"hello"
+
+
+# ---------------------------------------------------------------------------
+# Transaction context manager  (with redis.transaction():)
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestTransactionContext:
+    def test_basic_commit(self, redis):
+        redis.delete("test:txn:a")
+        with redis.transaction():
+            redis.set("test:txn:a", "1")
+        assert redis.get("test:txn:a") == b"1"
+
+    def test_multiple_commands_committed_atomically(self, redis):
+        redis.delete("test:txn:x", "test:txn:y")
+        with redis.transaction():
+            redis.set("test:txn:x", "10")
+            redis.set("test:txn:y", "20")
+        assert redis.get("test:txn:x") == b"10"
+        assert redis.get("test:txn:y") == b"20"
+
+    def test_discard_on_exception(self, redis):
+        redis.set("test:txn:discard", "original")
+        try:
+            with redis.transaction():
+                redis.set("test:txn:discard", "changed")
+                raise RuntimeError("oops")
+        except RuntimeError:
+            pass
+        # After DISCARD the queued SET was never executed
+        assert redis.get("test:txn:discard") == b"original"
+
+    def test_transaction_not_left_open_after_exception(self, redis):
+        """A normal command after a discarded transaction must succeed."""
+        try:
+            with redis.transaction():
+                raise ValueError("abort")
+        except ValueError:
+            pass
+        redis.set("test:txn:post", "ok")
+        assert redis.get("test:txn:post") == b"ok"
+
+
+# ---------------------------------------------------------------------------
+# Distributed lock  (with redis.lock():)
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestLock:
+    def test_basic_acquire_release(self, redis):
+        redis.delete("test:lock:basic")
+        with redis.lock("test:lock:basic", ttl=10):
+            assert redis.get("test:lock:basic") is not None
+        # released on exit
+        assert redis.get("test:lock:basic") is None
+
+    def test_lock_raises_when_held(self, redis):
+        redis.delete("test:lock:contend")
+        with redis.lock("test:lock:contend", ttl=10):
+            with pytest.raises(LockError):
+                with redis.lock("test:lock:contend", ttl=10):
+                    pass  # should never reach here
+
+    def test_lock_released_on_exception(self, redis):
+        redis.delete("test:lock:exc")
+        try:
+            with redis.lock("test:lock:exc", ttl=10):
+                raise RuntimeError("fail inside lock")
+        except RuntimeError:
+            pass
+        assert redis.get("test:lock:exc") is None
+
+    def test_lock_not_released_if_expired(self, redis):
+        """If the lock TTL expired and was re-acquired by a second holder,
+        the first holder's __exit__ must NOT delete the second holder's lock.
+        """
+        redis.delete("test:lock:expire")
+        token_holder1 = None
+
+        class _FakeLock(redis.Lock.__class__):
+            pass
+
+        lock1 = redis.Lock("test:lock:expire", ttl=10)
+        lock1.__enter__()
+        token_holder1 = lock1._token
+
+        # Simulate expiry: overwrite the key with a different token
+        redis.set("test:lock:expire", "other-token")
+
+        # exit should not delete the key because token doesn't match
+        lock1.__exit__(None, None, None)
+        assert redis.get("test:lock:expire") == b"other-token"
+
+        redis.delete("test:lock:expire")  # cleanup

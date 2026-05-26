@@ -112,6 +112,32 @@ class Counter:
     def __next__(self):
         return self._redis.incr(self.name)
 
+    def __iadd__(self, n):
+        self._redis.incrby(self.name, n)
+        return self
+
+    def __isub__(self, n):
+        self._redis.decrby(self.name, n)
+        return self
+
+    def __len__(self):
+        return int(self)
+
+    def __eq__(self, other):
+        return int(self) == int(other)
+
+    def __lt__(self, other):
+        return int(self) < int(other)
+
+    def __le__(self, other):
+        return int(self) <= int(other)
+
+    def __gt__(self, other):
+        return int(self) > int(other)
+
+    def __ge__(self, other):
+        return int(self) >= int(other)
+
 
 class String(object):
     """
@@ -331,6 +357,21 @@ class Hash(object):
         else:
             self._redis.hset(self._keyid, item, value)
 
+    def __getitem__(self, key):
+        return self._redis.hget(self._keyid, key)
+
+    def __setitem__(self, key, value):
+        self._redis.hset(self._keyid, key, value)
+
+    def __delitem__(self, key):
+        self._redis.hdel(self._keyid, key)
+
+    def __contains__(self, key):
+        return bool(self._redis.hexists(self._keyid, key))
+
+    def __len__(self):
+        return self._redis.hlen(self._keyid)
+
     def keys(self):
         return self._redis.hkeys(self._keyid)
 
@@ -341,3 +382,43 @@ class Hash(object):
         resp = self._redis.hgetall(self._keyid)
         if resp:
             return zip(resp[::2], resp[1::2])
+
+
+class LockError(Exception):
+    pass
+
+
+class Lock:
+    """Distributed lock backed by a Redis key.
+
+    Acquired with ``SET key <token> NX EX ttl``.  Released only if the
+    stored value still matches the token acquired on entry, preventing
+    accidental release of a lock that expired and was re-acquired by
+    another holder.
+
+    Intended to be used as a context manager via ``redis.lock()``.
+    """
+
+    def __init__(self, name, ttl=30):
+        self.name = name
+        self.ttl = ttl
+        self._token = None
+
+    def __enter__(self):
+        token = str(uuid4())
+        ok = self._redis.set(self.name, token, "NX", "EX", self.ttl)
+        if not ok:
+            raise LockError("Could not acquire lock: %r" % self.name)
+        self._token = token
+        return self
+
+    def __exit__(self, *_):
+        if self._token is None:
+            return
+        current = self._redis.get(self.name)
+        if current is not None:
+            if isinstance(current, bytes):
+                current = current.decode("utf-8")
+            if current == self._token:
+                self._redis.delete(self.name)
+        self._token = None
