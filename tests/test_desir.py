@@ -221,29 +221,33 @@ class TestVersionFiltering:
         assert pv("7.0.0-rc1") == (7, 0, 0)
 
     def test_supports_known_command(self):
+        # an explicit version means no server round-trip is needed
+        r = desir.Redis()
         # OBJECT was introduced in 2.2.3
-        assert desir.Redis.supports("object", "2.2.3") is True
-        assert desir.Redis.supports("object", "2.0.0") is False
-        assert desir.Redis.supports("get", "1.0.0") is True
+        assert r.supports("object", "2.2.3") is True
+        assert r.supports("object", "2.0.0") is False
+        assert r.supports("get", "1.0.0") is True
         # tuple version accepted as well
-        assert desir.Redis.supports("object", (2, 3, 0)) is True
+        assert r.supports("object", (2, 3, 0)) is True
 
     def test_supports_renamed_command(self):
+        r = desir.Redis()
         # DEL is exposed as delete(); lookup must resolve either spelling
-        assert desir.Redis.supports("delete", "1.0.0") is True
-        assert desir.Redis.supports("DEL", "1.0.0") is True
+        assert r.supports("delete", "1.0.0") is True
+        assert r.supports("DEL", "1.0.0") is True
 
     def test_supports_unknown_command(self):
-        assert desir.Redis.supports("no_such_command", "99.0.0") is False
+        assert desir.Redis().supports("no_such_command", "99.0.0") is False
 
     def test_command_json_lookup(self):
+        # command_json needs no version, so it stays a staticmethod
         assert "since" in desir.Redis.command_json("GET")
         # method-name spelling resolves to the DEL metadata
         assert desir.Redis.command_json("delete") is desir.Redis.command_json("DEL")
         assert desir.Redis.command_json("bogus") is None
 
     def test_commands_by_availability_partition(self):
-        avail, unsup = desir.Redis.commands_by_availability("2.6.0")
+        avail, unsup = desir.Redis().commands_by_availability("2.6.0")
         assert "get" in avail
         # ACL commands are post-6.0, so unavailable at 2.6.0
         assert "acl_cat" in unsup
@@ -255,6 +259,24 @@ class TestVersionFiltering:
         r = desir.Redis(db=9)
         assert "get" in r.available_commands("2.6.0")
         assert "acl_cat" in r.unsupported_commands("2.6.0")
+
+    def test_match_version_shadows_newer_commands(self):
+        # simulate an old server without needing one: override server_version
+        class OldRedis(desir.Redis):
+            def server_version(self):
+                return (5, 0, 0)
+
+        r = OldRedis(match_version=True)
+        # GETDEL (since 6.2.0) is shadowed; GET is not
+        assert "getdel" in r.__dict__
+        assert "get" not in r.__dict__
+        with pytest.raises(desir.RedisError):
+            r.getdel("k")
+
+    def test_match_version_false_exposes_all(self):
+        r = desir.Redis()  # default: no shadowing
+        assert "getdel" not in r.__dict__
+        assert callable(r.getdel)
 
 
 @requires_redis
@@ -272,6 +294,19 @@ class TestVersionFilteringLive:
         # the no-argument calls must agree with the explicit-version partition
         exp_avail, exp_unsup = redis.commands_by_availability(v)
         assert (avail, unsup) == (exp_avail, exp_unsup)
+
+    def test_supports_defaults_to_server(self, redis):
+        # no version argument -> resolved from the live server
+        assert redis.supports("get") is True
+        assert redis.supports("no_such_command") is False
+
+    def test_match_version_against_live_server(self, make_redis):
+        # the server supports its own version's commands, so nothing is shadowed
+        r = make_redis(match_version=True)
+        assert r.ping() in ("PONG", b"PONG")
+        r.set("mv", "hi")
+        if r.supports("getdel"):
+            assert r.getdel("mv") == b"hi"
 
 
 @requires_redis
