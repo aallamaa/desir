@@ -33,10 +33,11 @@
 
 import socket
 import time
-import urllib
+import urllib.request
+import urllib.error
 import threading
 import json
-from pkg_resources import resource_string
+from importlib.resources import files
 import builtins
 from .sugar import Counter, String, Connector, Hash
 
@@ -44,28 +45,48 @@ redisCommands = None
 
 DEFAULT_SENTINEL_TIMEOUT = 0.1
 
+# Canonical location of the upstream command description file. The historical
+# antirez/redis-doc repository now redirects here.
+COMMANDS_URL = \
+    "https://raw.githubusercontent.com/redis/redis-doc/master/commands.json"
+
+
+def parse_version(s):
+    """Turn a version string like ``"8.0.2"`` into a comparable ``(8, 0, 2)``
+    tuple. Non-numeric trailing parts are ignored, missing parts become 0."""
+    parts = []
+    for chunk in str(s).split("."):
+        digits = ""
+        for ch in chunk:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts) if parts else (0,)
+
+
 def reloadCommands(url):
     global redisCommands
     try:
         u = urllib.request.urlopen(url)
         redisCommands = json.load(u)
-    except urllib.request.HTTPError:
-        raise Exception("Error unable to load commmands json file")
+    except (urllib.error.URLError, ValueError) as e:
+        raise Exception(
+            "Error unable to load commmands json file: %s" % e)
 
 
 if "urlCommands" in dir(builtins):
     reloadCommands(builtins.urlCommands)
 
 # uncomment the following section if you want to force a reload at each import
-# urlCommands = \
-# "https://raw.githubusercontent.com/antirez/redis-doc/master/commands.json"
-# reloadCommands(urlCommands)
+# reloadCommands(COMMANDS_URL)
 
 if not redisCommands:
     try:
         redisCommands = json.loads(
-            resource_string(__name__, "commands.json").decode("utf-8"))
-    except IOError:
+            files(__package__).joinpath("commands.json").read_text("utf-8"))
+    except OSError:
         raise Exception("Error unable to load commmands json file")
 
 
@@ -97,6 +118,13 @@ class RedisInner(object):
 # commands name which requires renaming
 cmdmap = {"del": "delete", "exec": "execute"}
 
+
+def command_method_name(redis_name):
+    """Map a Redis command name (e.g. ``"GET"``, ``"DEL"``, ``"CONFIG GET"``)
+    to the Python method name exposed on the client."""
+    lowered = redis_name.lower()
+    return cmdmap.get(lowered, str(lowered.replace(" ", "_")))
+
 class MetaRedis(type):
     def __new__(metacls, name, bases, dct):
         def _wrapper(name, redisCommand, methoddct):
@@ -107,8 +135,7 @@ class MetaRedis(type):
             def _rediscmd(self, *args):
                 return methoddct[runcmd](self, name, *args)
 
-            _rediscmd.__name__ = cmdmap.get(
-                name.lower(), str(name.lower().replace(" ", "_")))
+            _rediscmd.__name__ = command_method_name(name)
             _rediscmd.__redisname__ = name
             _rediscmd._json = redisCommand
             if "summary" in redisCommand:
@@ -130,8 +157,7 @@ class MetaRedis(type):
 
         newDct = {}
         for k in redisCommands.keys():
-            newDct[cmdmap.get(k.lower(), str(k.lower().replace(" ", "_")))] = \
-                _wrapper(k, redisCommands[k], dct)
+            newDct[command_method_name(k)] = _wrapper(k, redisCommands[k], dct)
         newDct.update(dct)
         return type.__new__(metacls, name, bases, newDct)
 
@@ -167,14 +193,17 @@ class Redis(threading.local, metaclass=MetaRedis):
             if service_name:
                 self.service_name = service_name
             else:
+                self.service_name = None
                 for node in self.sentinels:
-                    res = node.runcmd('sentinel','masters')
+                    res = node.runcmd('sentinel', 'masters')
                     if res:
                         self.service_name = res[0][1].decode('utf8')
                         if debug:
                             print('discovered master', self.service_name)
+                        break
                 if not self.service_name:
-                    raise SentinelError('no master detected, please specify master')
+                    raise SentinelError(
+                        'no master detected, please specify service_name')
             new_nodes = set()
             for node in self.sentinels:
                 res = node.runcmd('sentinel', 'sentinels', self.service_name)
@@ -227,13 +256,15 @@ class Redis(threading.local, metaclass=MetaRedis):
     def listen(self, todict=False):
         while self.subscribed:
             r = self.__node__().parse_resp()
-            if r[0] == 'unsubscribe' and r[2] == 0:
+            # the message type comes back as bytes from parse_resp
+            msgtype = r[0].decode("utf-8") if isinstance(r[0], bytes) else r[0]
+            if msgtype == 'unsubscribe' and r[2] == 0:
                 self.subscribed = False
             if todict:
-                if r[0] == "pmessage":
-                    r = dict(type=r[0], pattern=r[1], channel=r[2], data=r[3])
+                if msgtype == "pmessage":
+                    r = dict(type=msgtype, pattern=r[1], channel=r[2], data=r[3])
                 else:
-                    r = dict(type=r[0], pattern=None, channel=r[1], data=r[2])
+                    r = dict(type=msgtype, pattern=None, channel=r[1], data=r[2])
             yield r
 
     def runcmd(self, cmdname, *args):
@@ -274,12 +305,83 @@ class Redis(threading.local, metaclass=MetaRedis):
 
     def _select(self, cmdname, *args):
         resp = self.runcmd(cmdname, *args)
-        if resp == "OK":
+        # parse_resp returns simple strings as bytes, so accept both forms
+        if resp in ("OK", b"OK"):
             self.db = int(args[0])
         return resp
 
     def runcmdon(self, node, cmdname, *args):
         return self.node.runcmd(cmdname, *args)
+
+    # -- version-aware command introspection ------------------------------
+
+    def server_version(self):
+        """Return the connected server's version as a tuple, e.g. (8, 0, 2),
+        parsed from the ``redis_version`` field of ``INFO``."""
+        info = self.info()
+        if isinstance(info, bytes):
+            info = info.decode("utf-8", "replace")
+        for line in info.splitlines():
+            if line.startswith("redis_version:"):
+                return parse_version(line.split(":", 1)[1].strip())
+        return None
+
+    @staticmethod
+    def command_json(command):
+        """Return the upstream metadata dict for a command, accepting either
+        the Redis name (``"GET"``, ``"CONFIG GET"``) or the Python method name
+        (``"delete"``). Returns None if the command is unknown."""
+        key = command.upper()
+        if key in redisCommands:
+            return redisCommands[key]
+        method = command.lower()
+        for name, meta in redisCommands.items():
+            if command_method_name(name) == method:
+                return meta
+        return None
+
+    @classmethod
+    def supports(cls, command, version):
+        """True if ``command`` exists at the given server ``version`` (a tuple
+        or version string). Commands with no ``since`` are assumed available;
+        commands absent from the description file are considered unsupported."""
+        if isinstance(version, str):
+            version = parse_version(version)
+        meta = cls.command_json(command)
+        if meta is None:
+            return False
+        since = meta.get("since")
+        return since is None or parse_version(since) <= version
+
+    @classmethod
+    def commands_by_availability(cls, version):
+        """Split every known command method name into ``(available,
+        unsupported)`` lists for the given ``version`` (tuple or string)."""
+        if isinstance(version, str):
+            version = parse_version(version)
+        available, unsupported = [], []
+        for name, meta in redisCommands.items():
+            method = command_method_name(name)
+            since = meta.get("since")
+            if since is None or parse_version(since) <= version:
+                available.append(method)
+            else:
+                unsupported.append(method)
+        return sorted(available), sorted(unsupported)
+
+    def available_commands(self, version=None):
+        """Sorted list of command method names available at ``version``
+        (defaults to the connected server's version)."""
+        if version is None:
+            version = self.server_version()
+        return self.commands_by_availability(version)[0]
+
+    def unsupported_commands(self, version=None):
+        """Sorted list of command method names NOT available at ``version``
+        (defaults to the connected server's version)."""
+        if version is None:
+            version = self.server_version()
+        return self.commands_by_availability(version)[1]
 
 
 class Node(object):
@@ -346,7 +448,7 @@ class Node(object):
         try:
             return self._fp.read(length)
         except socket.error as msg:
-            self.disconnet()
+            self.disconnect()
             if len(msg.args) == 1:
                 raise NodeError("Error connecting %s:%s. %s." % (
                     self.host, self.port, msg.args[0]))
@@ -369,7 +471,7 @@ class Node(object):
     def sendline(self, message):
         self.connect()
         try:
-            self._sock.send(message+b"\r\n")
+            self._sock.sendall(message+b"\r\n")
         except socket.error as msg:
             self.disconnect()
             if len(msg.args) == 1:
@@ -398,9 +500,9 @@ class Node(object):
     def parse_resp(self):
         resp = self.readline()
         if not resp:
+            # an empty read means the peer closed the connection
+            self.disconnect()
             raise NodeError('Empty response')
-            # resp empty what is happening ? to be investigated
-            return None
         if resp[:-2] in [b"$-1", b"*-1"]:
             return None
         fb, resp = resp[0], resp[1:]
@@ -428,7 +530,7 @@ class Node(object):
 class SubAsync(threading.Thread):
     def __init__(self, channel, callback, **redis_param):
         threading.Thread.__init__(self)
-        self.setDaemon(1)
+        self.daemon = True
         self.channel = channel
         self.callback = callback
         self.param = redis_param

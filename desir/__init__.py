@@ -1,7 +1,8 @@
 from sys import version_info
 if version_info[0] == 3:
     from .desir3 import (SubAsync, Node, Redis, RedisError,
-                         NodeError, RedisInner)
+                         NodeError, RedisInner, reloadCommands,
+                         parse_version, COMMANDS_URL)
     from .sugar import ConnectorError, SWM, Connector
 else:
     from .desir import SubAsync, Node, Redis, RedisError
