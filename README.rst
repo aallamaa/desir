@@ -113,8 +113,15 @@ server actually supports.
     >>> len(available), len(unsupported)
     (281, 89)
 
-    >>> "sintercard" in r.unsupported_commands()   # defaults to server_version()
-    False
+The version argument is optional everywhere — leave it out and it defaults to
+the connected server's version:
+
+.. code-block:: python
+
+    >>> r.supports("getdel")               # checked against the live server
+    True
+    >>> r.unsupported_commands()           # what this server can't do
+    []
 
 ``supports`` accepts either the Redis name (``"GETDEL"``) or the Python method
 name (``"getdel"``, ``"delete"``), and a version given as a string or a tuple.
@@ -124,6 +131,23 @@ To refresh the command set from the upstream description file:
 .. code-block:: python
 
     >>> desir.reloadCommands(desir.COMMANDS_URL)
+
+Matching the client to the server
+----------------------------------
+
+Pass ``match_version=True`` to bind the client to the connected server's
+version. Commands the server is too old for are then disabled, so calling one
+fails fast with a clear message instead of an opaque protocol error:
+
+.. code-block:: python
+
+    >>> r = desir.Redis(match_version=True)      # queries the server on connect
+    >>> r.getdel("k")                            # against, say, a Redis 6.0 server
+    Traceback (most recent call last):
+        ...
+    desir.RedisError: command 'getdel' requires Redis >= 6.2.0 but the server is 6.0.0 (client created with match_version=True)
+
+It defaults to ``False`` (every known command is exposed).
 
 
 Pythonic sugar
