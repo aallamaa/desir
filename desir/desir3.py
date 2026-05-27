@@ -39,7 +39,7 @@ import threading
 import json
 from importlib.resources import files
 import builtins
-from .sugar import Counter, String, Connector, Hash, Lock, LockError
+from .sugar import Counter, String, Connector, Hash, Lock, LockError, Stream
 
 redisCommands = None
 
@@ -289,6 +289,7 @@ class Redis(threading.local, metaclass=MetaRedis):
     Connector = RedisInner(Connector)
     Hash = RedisInner(Hash)
     Lock = RedisInner(Lock)
+    Stream = RedisInner(Stream)
 
     def __init__(self, host="localhost", port=6379, db=0,
                  password=None, timeout=None, safe=False, sentinels=None, service_name=None,

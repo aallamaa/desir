@@ -14,9 +14,10 @@ wire protocol:
 * **Redis types are wrapped as native Python idioms** — a counter you can
   iterate, compare and do arithmetic with (``c += 5``), a hash that behaves
   like both an object (``h.name``) and a mapping (``h["name"]``, ``"name" in
-  h``, ``len(h)``), a string exposed as a descriptor, and a message
-  ``Connector`` offering Erlang-style ``send`` / ``receive`` plus transparent
-  remote-procedure calls through proxy objects.
+  h``, ``len(h)``), a string exposed as a descriptor, a ``Stream`` you can
+  append to with ``<<`` and iterate like a sequence with full consumer-group
+  support, and a message ``Connector`` offering Erlang-style ``send`` /
+  ``receive`` plus transparent remote-procedure calls through proxy objects.
 * **Context managers for every resource** — connections, transactions,
   distributed locks, and pub/sub subscriptions all support the ``with``
   statement so resources are never left open accidentally.
@@ -255,6 +256,127 @@ classes:
     >>> cfg.title = "Hello"                # -> SET site:title Hello
     >>> r.get("site:title")
     b'Hello'
+
+Stream — an append-only log
+----------------------------
+
+``Stream`` wraps a Redis Stream key.  The ``<<`` operator appends an entry and
+returns the auto-generated entry ID:
+
+.. code-block:: python
+
+    >>> s = r.Stream("events")
+    >>> s << {"type": "login", "user": "alice"}
+    b'1748392847123-0'
+    >>> s << {"type": "logout", "user": "alice"}
+    b'1748392847456-0'
+    >>> len(s)                             # XLEN
+    2
+
+Iteration and range reads return ``(entry_id, fields_dict)`` pairs.  Field
+names are decoded to ``str``; values come back as raw ``bytes``, consistent
+with the rest of desir:
+
+.. code-block:: python
+
+    >>> for entry_id, data in s:           # full history, oldest first
+    ...     print(entry_id, data["type"].decode())
+    1748392847123-0 login
+    1748392847456-0 logout
+
+    >>> s.range(count=1)                   # first entry only
+    [('1748392847123-0', {'type': b'login', 'user': b'alice'})]
+
+    >>> s.revrange(count=1)                # last entry (newest first)
+    [('1748392847456-0', {'type': b'logout', 'user': b'alice'})]
+
+Fan-out reads with an explicit cursor (no consumer group):
+
+.. code-block:: python
+
+    >>> checkpoint = "0"
+    >>> while True:
+    ...     batch = s.read(count=100, last_id=checkpoint)
+    ...     if not batch:
+    ...         break
+    ...     for entry_id, data in batch:
+    ...         process(data)
+    ...         checkpoint = entry_id
+
+Bounded streams — keep the stream at most *N* entries by passing ``maxlen``
+to the constructor (applied as ``MAXLEN ~`` on every append) or by calling
+``trim()`` explicitly:
+
+.. code-block:: python
+
+    >>> log = r.Stream("audit", maxlen=10_000)   # capped automatically
+    >>> log << {"event": "deploy", "version": "2.1"}
+
+    >>> log.trim(5_000, approximate=False)        # exact trim
+
+Consumer groups
+~~~~~~~~~~~~~~~
+
+``stream.group(name, consumer)`` returns a ``StreamGroup`` that wraps the
+full consumer-group protocol — create, read, acknowledge, and inspect
+pending entries:
+
+.. code-block:: python
+
+    >>> jobs = r.Stream("jobs")
+    >>> grp  = jobs.group("workers", "worker-1")
+    >>> grp.create(start="0", mkstream=True)  # "0" = replay all history
+
+    # producer
+    >>> jobs << {"task": "resize",    "file": "img.png"}
+    >>> jobs << {"task": "transcode", "file": "vid.mp4"}
+
+    # consumer
+    >>> entries = grp.read(count=10)
+    >>> for entry_id, data in entries:
+    ...     do_work(data["task"].decode())
+    ...     grp.ack(entry_id)                 # XACK — remove from PEL
+
+``for`` over a group drains all immediately available entries, yielding one
+``(entry_id, fields)`` pair at a time:
+
+.. code-block:: python
+
+    >>> for entry_id, data in grp:
+    ...     handle(data)
+    ...     grp.ack(entry_id)
+
+Multiple consumers in the same group share the work — each entry is delivered
+to exactly one of them:
+
+.. code-block:: python
+
+    >>> grp_a = jobs.group("pool", "worker-a")
+    >>> grp_b = jobs.group("pool", "worker-b")
+    >>> grp_a.create(start="0")         # only one consumer needs to call create
+
+Blocked reads wait for new entries up to a timeout (milliseconds):
+
+.. code-block:: python
+
+    >>> r2 = desir.Redis(timeout=None)         # socket timeout must be ≥ block
+    >>> live = r2.Stream("feed")
+    >>> grp  = live.group("consumers", "c1")
+    >>> grp.create(mkstream=True)
+    >>> while True:
+    ...     entries = grp.read(count=1, block=5_000)   # 5-second long-poll
+    ...     if not entries:
+    ...         continue
+    ...     entry_id, data = entries[0]
+    ...     process(data)
+    ...     grp.ack(entry_id)
+
+Inspect the pending-entry list (delivered but not yet acknowledged):
+
+.. code-block:: python
+
+    >>> pending = grp.pending(count=50)    # XPENDING — entries stuck in the PEL
+    >>> grp.destroy()                      # drop the consumer group
 
 
 Context managers

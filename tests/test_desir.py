@@ -18,7 +18,7 @@ import time
 import pytest
 
 import desir
-from desir.sugar import _sign, _MAC_SIZE, SWM, ConnectorError, LockError
+from desir.sugar import _sign, _MAC_SIZE, SWM, ConnectorError, LockError, Stream
 
 from conftest import requires_redis
 
@@ -991,3 +991,141 @@ class TestLock:
         assert redis.get("test:lock:expire") == b"other-token"
 
         redis.delete("test:lock:expire")  # cleanup
+
+
+# ---------------------------------------------------------------------------
+# Redis Streams
+# ---------------------------------------------------------------------------
+
+@requires_redis
+class TestStream:
+    def test_add_returns_entry_id(self, redis):
+        s = redis.Stream("test:stream:basic")
+        entry_id = s << {"action": "login", "user": "alice"}
+        assert entry_id is not None
+        # IDs look like "1234567890123-0"
+        decoded = entry_id.decode() if isinstance(entry_id, bytes) else entry_id
+        assert "-" in decoded
+
+    def test_len(self, redis):
+        s = redis.Stream("test:stream:len")
+        assert len(s) == 0
+        s << {"x": "1"}
+        s << {"x": "2"}
+        assert len(s) == 2
+
+    def test_range_returns_parsed_entries(self, redis):
+        s = redis.Stream("test:stream:range")
+        s << {"color": "red"}
+        s << {"color": "blue"}
+        entries = s.range()
+        assert len(entries) == 2
+        ids, datas = zip(*entries)
+        colors = [d["color"] for d in datas]
+        # desir returns values as bytes
+        assert b"red" in colors
+        assert b"blue" in colors
+
+    def test_iter_equivalent_to_range(self, redis):
+        s = redis.Stream("test:stream:iter")
+        s << {"n": "1"}
+        s << {"n": "2"}
+        assert list(s) == s.range()
+
+    def test_revrange(self, redis):
+        s = redis.Stream("test:stream:rev")
+        s << {"seq": "first"}
+        s << {"seq": "second"}
+        fwd = s.range()
+        rev = s.revrange()
+        assert [e[0] for e in fwd] == list(reversed([e[0] for e in rev]))
+
+    def test_add_with_maxlen(self, redis):
+        # Use a large stream (1000+ entries) so that approximate MAXLEN ~ N
+        # actually fires; with tiny counts Redis skips the trim as an optimisation
+        s = redis.Stream("test:stream:maxlen", maxlen=100)
+        for i in range(500):
+            s << {"i": str(i)}
+        assert len(s) < 500
+
+    def test_trim(self, redis):
+        s = redis.Stream("test:stream:trim")
+        for i in range(20):
+            s << {"i": str(i)}
+        s.trim(5, approximate=False)
+        assert len(s) == 5
+
+    def test_read_from_zero(self, redis):
+        s = redis.Stream("test:stream:read")
+        s << {"k": "v1"}
+        s << {"k": "v2"}
+        entries = s.read()
+        assert len(entries) == 2
+
+    def test_read_from_last_id(self, redis):
+        s = redis.Stream("test:stream:readfrom")
+        first_id = (s << {"k": "a"}).decode()
+        s << {"k": "b"}
+        entries = s.read(last_id=first_id)
+        assert len(entries) == 1
+        assert entries[0][1]["k"] == b"b"
+
+    def test_stream_class_accessible_on_redis(self):
+        assert callable(desir.Redis.Stream)
+
+    def test_stream_is_redininner_wrapped(self, redis):
+        s = redis.Stream("test:stream:wrap")
+        assert s._redis is redis
+
+
+@requires_redis
+class TestStreamGroup:
+    def test_create_and_read_and_ack(self, redis):
+        s = redis.Stream("test:sg:basic")
+        grp = s.group("workers", "c1")
+        grp.create(start="0", mkstream=True)
+
+        s << {"job": "task1"}
+        s << {"job": "task2"}
+
+        entries = grp.read(count=2)
+        assert len(entries) == 2
+        assert entries[0][1]["job"] == b"task1"
+        assert entries[1][1]["job"] == b"task2"
+
+        ids = [e[0] for e in entries]
+        acked = grp.ack(*ids)
+        assert acked == 2
+
+    def test_read_returns_empty_when_no_new(self, redis):
+        s = redis.Stream("test:sg:empty")
+        grp = s.group("grp", "c1")
+        grp.create(start="$", mkstream=True)
+        assert grp.read(count=5) == []
+
+    def test_iter_drains_available_entries(self, redis):
+        s = redis.Stream("test:sg:iter")
+        grp = s.group("grp", "c1")
+        grp.create(start="0", mkstream=True)
+
+        s << {"n": "1"}
+        s << {"n": "2"}
+        s << {"n": "3"}
+
+        collected = list(grp)
+        assert len(collected) == 3
+        ns = [e[1]["n"] for e in collected]
+        assert b"1" in ns and b"2" in ns and b"3" in ns
+
+    def test_destroy(self, redis):
+        s = redis.Stream("test:sg:destroy")
+        grp = s.group("todelete", "c1")
+        grp.create(mkstream=True)
+        grp.destroy()
+        # re-creating the same group succeeds only if it was truly deleted
+        grp.create(mkstream=True)
+
+    def test_group_uses_stream_redis(self, redis):
+        s = redis.Stream("test:sg:ref")
+        grp = s.group("g", "c")
+        assert grp._redis is redis

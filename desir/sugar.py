@@ -424,3 +424,182 @@ class Lock:
             if current == self._token:
                 self._redis.delete(self.name)
         self._token = None
+
+
+class StreamGroup:
+    """Consumer group tied to a Stream.
+
+    Obtain via ``stream.group(name, consumer)`` rather than instantiating
+    directly.  ``_redis`` is reached through the parent ``Stream`` instance so
+    no ``RedisInner`` wrapping is required here.
+    """
+
+    def __init__(self, stream, group, consumer):
+        self.stream = stream
+        self.group = group
+        self.consumer = consumer
+
+    @property
+    def _redis(self):
+        return self.stream._redis
+
+    def create(self, start="$", mkstream=False):
+        """Create the consumer group on the server.
+
+        *start* is the entry-ID from which the group will start consuming;
+        use ``"0"`` to replay the whole stream or ``"$"`` (default) to receive
+        only new entries.  Pass ``mkstream=True`` to have the stream key
+        created automatically when it does not yet exist.
+        """
+        args = [self.stream.name, self.group, start]
+        if mkstream:
+            args.append("MKSTREAM")
+        return self._redis.xgroup_create(*args)
+
+    def destroy(self):
+        """Delete this consumer group from the server."""
+        return self._redis.xgroup_destroy(self.stream.name, self.group)
+
+    def read(self, count=None, block=None):
+        """Fetch undelivered entries for this consumer (``>``).
+
+        *count* caps the number of entries returned per call.
+        *block* is a millisecond timeout; ``0`` blocks indefinitely.
+        Returns a list of ``(entry_id, fields_dict)`` tuples.
+        """
+        args = ["GROUP", self.group, self.consumer]
+        if count is not None:
+            args += ["COUNT", count]
+        if block is not None:
+            args += ["BLOCK", block]
+        args += ["STREAMS", self.stream.name, ">"]
+        raw = self._redis.xreadgroup(*args)
+        if not raw:
+            return []
+        return [self.stream._parse_entry(e) for e in raw[0][1]]
+
+    def ack(self, *entry_ids):
+        """Acknowledge one or more processed entry IDs."""
+        return self._redis.xack(self.stream.name, self.group, *entry_ids)
+
+    def pending(self, count=10, start="-", end="+"):
+        """Return pending (unacknowledged) entries for this group."""
+        return self._redis.xpending(
+            self.stream.name, self.group, start, end, count)
+
+    def __iter__(self):
+        """Drain all immediately available entries one at a time."""
+        while True:
+            entries = self.read(count=1)
+            if not entries:
+                return
+            yield entries[0]
+
+
+class Stream:
+    """Pythonic wrapper around a Redis Stream key.
+
+    Usage::
+
+        s = redis.Stream("events")
+        s << {"type": "login", "user": "alice"}   # append
+        for entry_id, data in s:                   # iterate history
+            print(entry_id, data)
+
+        grp = s.group("workers", "consumer-1")
+        grp.create(start="0", mkstream=True)
+        for entry_id, data in grp:
+            process(data)
+            grp.ack(entry_id)
+    """
+
+    def __init__(self, name, maxlen=None):
+        self.name = name
+        self.maxlen = maxlen  # when set, every add() applies MAXLEN ~ N
+
+    # --- write ----------------------------------------------------------
+
+    def add(self, data, entry_id="*"):
+        """Append *data* (a mapping) to the stream, returning the new entry ID."""
+        args = [self.name]
+        if self.maxlen is not None:
+            args += ["MAXLEN", "~", self.maxlen]
+        args.append(entry_id)
+        for k, v in data.items():
+            args += [k, v]
+        return self._redis.xadd(*args)
+
+    def __lshift__(self, data):
+        """``stream << {"field": "value"}`` — append shorthand."""
+        return self.add(data)
+
+    def trim(self, maxlen, approximate=True):
+        """Trim the stream to at most *maxlen* entries."""
+        args = [self.name, "MAXLEN"]
+        if approximate:
+            args.append("~")
+        args.append(maxlen)
+        return self._redis.xtrim(*args)
+
+    # --- parse ----------------------------------------------------------
+
+    @staticmethod
+    def _parse_entry(raw):
+        """Convert ``[id_bytes, [f, v, f, v, …]]`` → ``(id_str, {f: v})``."""
+        raw_id, raw_fields = raw
+        entry_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        it = iter(raw_fields)
+        fields = {
+            (k.decode() if isinstance(k, bytes) else k): v
+            for k, v in zip(it, it)
+        }
+        return entry_id, fields
+
+    # --- read -----------------------------------------------------------
+
+    def range(self, start="-", end="+", count=None):
+        """Return entries between *start* and *end* as ``(id, fields)`` tuples."""
+        args = [self.name, start, end]
+        if count is not None:
+            args += ["COUNT", count]
+        raw = self._redis.xrange(*args)
+        return [self._parse_entry(e) for e in raw] if raw else []
+
+    def revrange(self, end="+", start="-", count=None):
+        """Like :meth:`range` but in reverse chronological order."""
+        args = [self.name, end, start]
+        if count is not None:
+            args += ["COUNT", count]
+        raw = self._redis.xrevrange(*args)
+        return [self._parse_entry(e) for e in raw] if raw else []
+
+    def read(self, count=None, last_id="0"):
+        """Read entries newer than *last_id* (non-group XREAD)."""
+        args = []
+        if count is not None:
+            args += ["COUNT", count]
+        args += ["STREAMS", self.name, last_id]
+        raw = self._redis.xread(*args)
+        if not raw:
+            return []
+        return [self._parse_entry(e) for e in raw[0][1]]
+
+    # --- collection protocol --------------------------------------------
+
+    def __len__(self):
+        return self._redis.xlen(self.name)
+
+    def __iter__(self):
+        return iter(self.range())
+
+    # --- introspection --------------------------------------------------
+
+    def info(self):
+        """Return the XINFO STREAM metadata dict for this stream."""
+        return self._redis.xinfo_stream(self.name)
+
+    # --- consumer groups ------------------------------------------------
+
+    def group(self, name, consumer):
+        """Return a :class:`StreamGroup` for *name* and *consumer*."""
+        return StreamGroup(self, name, consumer)
